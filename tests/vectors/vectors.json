@@ -1,0 +1,216 @@
+{
+ "comment": "Language-neutral vectors for ports. Labels per level 0..top.",
+ "generalization": [
+  {
+   "name": "numeric ints",
+   "settings": {
+    "type": "numeric",
+    "widths": [
+     5,
+     10
+    ]
+   },
+   "values": [
+    "34",
+    "-3",
+    "",
+    "x"
+   ],
+   "labels": [
+    [
+     "34",
+     "[30,35)",
+     "[30,40)",
+     "*"
+    ],
+    [
+     "-3",
+     "[-5,0)",
+     "[-10,0)",
+     "*"
+    ],
+    [
+     "",
+     "*",
+     "*",
+     "*"
+    ],
+    [
+     "x",
+     "*",
+     "*",
+     "*"
+    ]
+   ]
+  },
+  {
+   "name": "numeric decimals",
+   "settings": {
+    "type": "numeric",
+    "widths": [
+     10
+    ]
+   },
+   "values": [
+    "1.5",
+    "12"
+   ],
+   "labels": [
+    [
+     "1.5",
+     "[0,10)",
+     "*"
+    ],
+    [
+     "12",
+     "[10,20)",
+     "*"
+    ]
+   ]
+  },
+  {
+   "name": "date",
+   "settings": {
+    "type": "date"
+   },
+   "values": [
+    "1994-07-15",
+    "1994-02-30"
+   ],
+   "labels": [
+    [
+     "1994-07-15",
+     "1994-07",
+     "1994",
+     "1990s",
+     "*"
+    ],
+    [
+     "1994-02-30",
+     "*",
+     "*",
+     "*",
+     "*"
+    ]
+   ]
+  },
+  {
+   "name": "prefix",
+   "settings": {
+    "type": "prefix",
+    "length": 3
+   },
+   "values": [
+    "1500001",
+    "12"
+   ],
+   "labels": [
+    [
+     "1500001",
+     "150000*",
+     "15000**",
+     "1500***",
+     "*"
+    ],
+    [
+     "12",
+     "1*",
+     "**",
+     "**",
+     "*"
+    ]
+   ]
+  },
+  {
+   "name": "category",
+   "settings": {
+    "type": "category",
+    "hierarchy": {
+     "Tokyo": [
+      "Kanto",
+      "Japan"
+     ],
+     "Osaka": [
+      "Kansai",
+      "Japan"
+     ]
+    }
+   },
+   "values": [
+    "Tokyo",
+    "Osaka",
+    "Paris"
+   ],
+   "labels": [
+    [
+     "Tokyo",
+     "Kanto",
+     "Japan",
+     "*"
+    ],
+    [
+     "Osaka",
+     "Kansai",
+     "Japan",
+     "*"
+    ],
+    [
+     "Paris",
+     "*",
+     "*",
+     "*"
+    ]
+   ]
+  },
+  {
+   "name": "exact",
+   "settings": {
+    "type": "exact"
+   },
+   "values": [
+    "x"
+   ],
+   "labels": [
+    [
+     "x",
+     "*"
+    ]
+   ]
+  }
+ ],
+ "pseudonym": {
+  "key_hex": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+  "cases": [
+   [
+    "name",
+    "Alice",
+    "p-uf27kru7omt7sq2d"
+   ],
+   [
+    "name",
+    "  Alice ",
+    "p-uf27kru7omt7sq2d"
+   ],
+   [
+    "name",
+    "が",
+    "p-o7nzvn66rvvt4m5q"
+   ],
+   [
+    "name",
+    "が",
+    "p-o7nzvn66rvvt4m5q"
+   ],
+   [
+    "email",
+    "a@b.com",
+    "p-r6tr4ivz3wanwqgy"
+   ],
+   [
+    "name",
+    "",
+    ""
+   ]
+  ]
+ }
+}
