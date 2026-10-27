@@ -1,6 +1,6 @@
 # Sieve Crowd v0.2.0
 
-[English](README.md) | 日本語
+English | [日本語](README.ja.md)
 
 **Table data anonymization and privacy protection engine**
 
