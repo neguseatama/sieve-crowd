@@ -1,6 +1,6 @@
 # Sieve Crowd — Specification
 
-Version 0.3.0. [日本語版](SPEC.ja.md)
+Version 0.4.0. [日本語版](SPEC.ja.md)
 
 Sieve Crowd turns a table about people (CSV, JSON or XML) into a table in which every record belongs to a **crowd**
 of at least *k* records that look alike on the columns an outsider could already know, and **measures the result on
@@ -62,9 +62,12 @@ violates only if all its parts violate). Hence the least total height `h*` with 
 search over heights; the top node (everything `*`) decides feasibility (otherwise `infeasible`).
 
 *Objective* (lexicographic): least normalized loss `Σ level_i / L_i`, then fewest suppressed records, then the smallest
-level vector. Phase 1 finds `h*` and its best node; phase 2 inspects every node with height ≥ `h*` whose loss does not
-exceed that node's loss (when the lattice has ≤ 200,000 nodes), so the result is the optimum. The receipt reports
-`refinement_truncated` if the evaluation limit stopped phase 2.
+level vector. Phase 1 finds `h*` and its best node; phase 2 walks the region `height ≥ h*, loss ≤ that node's loss`
+depth-first, most general node first (when the lattice has ≤ 200,000 nodes). Three prunes skip what provably cannot
+beat the incumbent: subtrees that can no longer reach `h*`, subtrees already heavier than the incumbent, and every
+node at or below a rejected node (monotonicity: suppressing less never fixes a crowd). Nothing is materialised; the
+result is the optimum. The receipt reports `refinement_truncated` if the evaluation limit stopped phase 2. Evaluation
+counts are informational and may differ between versions.
 
 *Limits.* `max_rows` (default 200,000) and `max_evals` node evaluations (default 20,000). Exceeding them refuses with
 `resource_limit_rows` / `resource_limit_search`. All tie-breaks are deterministic.
@@ -84,14 +87,22 @@ default 0. Keeping the input order (`--keep-order`) is a **relaxation** and is l
 ## 7. Configuration
 
 ```json
-{ "k": 5, "l": 2, "max_suppression": 0.05,
+{ "k": 5, "l": 2, "max_suppression": 0.05, "missing_value_policy": "star",
   "columns": { "<column>": { "role": "...", ... } } }
 ```
 
 Strict: unknown keys, an unknown role, a role of `?` (the template written by `inspect`), `k < 2`, `max_suppression`
-outside [0, 1), no `qi` column, `l > 1` without a `sensitive` column, `pseudonymize` without a key, and any mismatch
-between the table's columns and the configuration are rejected (messages name columns, never cell values).
-Settings may be overridden on the command line (`--k`, `--l`, `--max-suppression`). Keys beginning with `_` are comments and are ignored.
+outside [0, 1), a `missing_value_policy` other than `star` or `suppress`, no `qi` column, `l > 1` without a `sensitive`
+column, `pseudonymize` without a key, and any mismatch between the table's columns and the configuration are rejected
+(messages name columns, never cell values). Settings may be overridden on the command line (`--k`, `--l`,
+`--max-suppression`, `--missing-value-policy`). Keys beginning with `_` are comments and are ignored.
+
+`missing_value_policy` decides what happens to records whose quasi-identifier value is empty after normalization and
+trim. `star` (default) keeps them: the value takes part like any value and generalizes to `*` from level 1, so records
+with missing values form crowds of their own at low levels. `suppress` removes them before the search and counts them
+against the suppression budget; when they alone exceed the budget the run refuses with `missing_exceeds_budget`. A
+placeholder policy is deliberately not offered: filled-in values would make the missing pattern itself a
+quasi-identifier.
 
 ## 8. Command line
 
@@ -99,8 +110,8 @@ Settings may be overridden on the command line (`--k`, `--l`, `--max-suppression
 |---|---|
 | `inspect FILE [--config-out F] [--in-format F] [--lang]` | per column: distinct values, empties, share of unique values, apparent shape, and a *hint* (from the column name and the values, e.g. "looks like a direct identifier"); writes a template with role `?` and the hint as a `_hint` comment. Roles are never assigned automatically |
 | `keygen -o F` | writes a random key (file mode 600); never replaces an existing file without `--force` |
-| `run FILE -c CONFIG (-o OUT \| --dry-run)` | anonymize; options `--key-file --k --l --max-suppression --keep-order --shuffle-seed --lang --delimiter --in-format --out-format --max-rows --max-evals --report-json --quiet --force` |
-| `plan FILE -c CONFIG` | pre-flight profile of the run, before any search: options `--k --l --max-suppression --max-rows --max-evals --key-file --lang --delimiter --in-format --report-json --quiet` |
+| `run FILE -c CONFIG (-o OUT \| --dry-run)` | anonymize; options `--key-file --k --l --max-suppression --missing-value-policy --keep-order --shuffle-seed --lang --delimiter --in-format --out-format --max-rows --max-evals --report-json --quiet --force` |
+| `plan FILE -c CONFIG` | pre-flight profile of the run, before any search: options `--k --l --max-suppression --missing-value-policy --max-rows --max-evals --key-file --lang --delimiter --in-format --report-json --quiet` |
 
 The plan is a receipt of its own (`status = "plan"`). It reports only **exact** numbers: the lattice
 size and maximum height follow from the configuration alone (each QI contributes `levels + 1` nodes),
@@ -109,9 +120,11 @@ level-0 crowd statistics (crowds, singletons, records in crowds smaller than k) 
 over the table, and every `sensitive` column's distinct-value count decides l-reachability. It never
 estimates: nothing about the search itself is predicted. Warnings (codes with parameters):
 `rows_over_limit`, `k_unreachable`, `l_unreachable`, `budget_zero` (no suppression allowed while
-records already sit in too-small crowds at level 0), `lattice_large` (above the refinement cap, so
+records already sit in too-small crowds at level 0), `missing_over_budget` (under `suppress`: more empty-QI records
+than the budget), `lattice_large` (above the refinement cap, so
 phase 2 is skipped), `evals_tight` (lattice larger than `max_evals`) and `many_singletons` (≥ 50% of
-records alone at level 0 — a heuristic). The plan performs no search, writes no table, and exits 0.
+records alone at level 0 — a heuristic). The plan also reports how many records have an empty QI value under the
+current policy. The plan performs no search, writes no table, and exits 0.
 
 The output is never the input file and an existing output needs `--force`; files are written atomically. Exit codes:
 0 ok · 1 I/O · 2 configuration/usage/invalid input · 3 refused. Input is UTF-8 (a BOM is accepted); the output is
@@ -145,7 +158,8 @@ another: `run people.csv -c config.json -o people_safe.json`.
 
 Machine part (`--report-json`, English identifiers) and human part (`--lang en|ja`) come from one object: version,
 Unicode data version, `status`, `reason` (if refused), input size, `io` (`input_format`, and `output_format` when a
-table is written), settings, result (records out, suppressed, rate), privacy (QI list, `before`: records that were
+table is written), settings, result (records out, suppressed, rate; and, under the `suppress` missing-value policy,
+`missing_suppressed` — the records dropped before the search), privacy (QI list, `before`: records that were
 one-of-a-kind on the QI columns in the input, `k_requested`, `k_achieved`, crowds, five smallest crowd sizes, records
 alone in a crowd, maximum and average risk, achieved diversity per sensitive column), information loss (height /
 maximum height, precision loss), per-column disposition (for QIs: level and a description; for `keep` columns: the
@@ -158,7 +172,8 @@ dropped crowds and records, a crowd-size histogram (capped at 20 entries), the s
 at its top level, how many dropped records one coarsening step would rescue. Refused runs carry reason-specific
 `diagnostics`: `infeasible` (records vs k; per sensitive column distinct values vs l), `resource_limit_search`
 (lattice size, levels per QI, evaluations used vs the limit), `verification_failed` (crowd-size histogram of the
-output, per-column l shortfalls, the tested level vector). Diagnostics name columns and report sizes and counts
+output, per-column l shortfalls, the tested level vector), `missing_exceeds_budget` (records, missing records, budget).
+Diagnostics name columns and report sizes and counts
 only — the labels of individual crowds (which are derived from cell values) are never reported.
 
 ## 10. Invariants checked by the tests
@@ -166,7 +181,8 @@ only — the labels of individual crowds (which are derived from cell values) ar
 | | |
 |---|---|
 | — | The measured k of the output is ≥ the requested k, and measured diversity ≥ l (plain counting in the test). |
-| — | The search equals a brute-force oracle over the whole lattice (objective of section 4). |
+| — | The search equals a brute-force oracle over the whole lattice (objective of section 4), including the pruned phase-2 walk. |
+| — | `suppress` drops exactly the records with an empty QI value, inside the budget; more than that refuses with `missing_exceeds_budget`. |
 | — | Acceptability is monotone along every generalization step. |
 | — | Every hierarchy coarsens (tested on random values for every generalizer). |
 | — | Same table + settings ⇒ same output; SplitMix64 and pseudonym vectors fixed (`tests/vectors`). |
@@ -183,6 +199,7 @@ only — the labels of individual crowds (which are derived from cell values) ar
   is easy to notice.
 * l-diversity is the *distinct* variant. Record suppression removes whole crowds; values are not masked in place.
 * Missing and unparseable values are generalized straight to `*`, so they form crowds of their own at low levels.
+  The `suppress` policy removes records with an empty QI value before the search instead, within the same budget.
 * `numeric` custom `bins` choose their label text from the edges as configured; the column's integer/decimal mode
   (decided from the data, as for `widths`) only picks between `0-19` / `[0,20)` styles.
 * The plan mode shares the run's configuration validation and reads the table once; it never runs the lattice search.
@@ -208,6 +225,8 @@ only — the labels of individual crowds (which are derived from cell values) ar
 | — | `inspect` gives hints, never roles; the receipt shows the situation before and after | explain the value in terms the reader cares about, without guessing for them |
 | — | Custom `bins` for numeric columns (interior edges, open ends) | legal and practical classifications are non-uniform; the multiple-of rule stays for `widths` |
 | — | Diagnostics are aggregate-only (sizes, counts, levels — never crowd labels) | tuning must not cost confidentiality; the receipt stays shareable |
+| — | `missing_value_policy` is `star` (default) or `suppress`; no placeholder | a filled-in value would make the missing pattern itself a quasi-identifier; suppression stays inside a counted budget |
+| — | Phase 2 walks the region depth-first with monotone pruning and materialises nothing | the optimum is pinned by the brute-force oracle; no region-sized lists in memory; evaluation counts are informational |
 | — | `plan` reports only exact numbers and performs no search | an estimate would erode the measured-guarantee stance; the exact lattice size is already decidable from the configuration |
 | — | Formats by extension with explicit `--in-format` / `--out-format`; no Excel support | predictable files, unambiguous exceptions, and no third-party readers |
 | — | JSON as records or `{"header", "rows"}`; cells normalize to strings at the door | the engine stays format-blind; strict rejection keeps tables unambiguous |

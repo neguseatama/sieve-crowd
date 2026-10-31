@@ -1,4 +1,4 @@
-# Sieve Crowd v0.3.0
+# Sieve Crowd v0.4.0
 
 English | [日本語](README.ja.md)
 
@@ -63,6 +63,8 @@ Sieve is a family of engines that share three design principles — deterministi
   When records are suppressed, the receipt explains why — crowd sizes, "smaller than k" vs "short of diversity", and a per-column hint of which quasi-identifier one more generalization step would rescue. In aggregates only; never a cell value.
 - **Custom bins for numeric columns**
   Non-uniform classifications such as `0-19, 20-39, 40-64, 65+` (legal age brackets, income bands) can be given directly as bin edges.
+- **A policy for missing values**
+  `missing_value_policy` decides what happens to records whose quasi-identifier is empty: `star` (default) generalizes the value to `*`; `suppress` removes the record up front, inside the same counted suppression budget (and refuses with `missing_exceeds_budget` when they exceed it). No placeholder option — filling values in would turn the missing pattern itself into an identifier.
 - **Receipt for the record**
   A machine-readable receipt records what was done (rules applied, suppression count, measurements). The receipt contains no personal information.
 - **Supported formats**
@@ -143,6 +145,7 @@ Yamamoto Aoi,1971-10-04,55,1510061,M,flu        55-59,15100**,M,asthma
 | `k` | 5 | Each record must have at least k−1 look-alikes. Larger is safer but increases generalization. |
 | `l` | optional | Every crowd must hold at least l distinct sensitive values, preventing "everyone has the same diagnosis". |
 | `max_suppression` | 0.05 (5%) | The maximum fraction of records that may be removed (suppressed) instead of lowering the resolution of the whole table. |
+| `missing_value_policy` | `star` | `star`: an empty quasi-identifier generalizes to `*` like any value. `suppress`: such records are removed before the search, counted against `max_suppression`. |
 | Role (`role`) | — | `id` (drop or pseudonymize) · `qi` (generalize) · `sensitive` (keep) · `keep` (keep) · `drop` (remove) |
 | Generalizer (`type`) | — | For `qi` columns: `numeric` (`widths`, or custom non-uniform `bins`), `date`, `prefix`, `category` (hierarchy), `exact` |
 
