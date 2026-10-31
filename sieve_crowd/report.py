@@ -37,9 +37,17 @@ _MSG = {
         "order_shuffled": "Row order: shuffled (seed {seed})",
         "order_kept": "Row order: kept as in the input",
         "loss": "Information loss: generalization {h}/{H} steps, suppression {pct:.1f}%",
+        "suppression_detail": ("Suppression detail: {crowds} crowd(s), {records} record(s): "
+                                "{kc} smaller than k ({kr} records), {lc} short of diversity ({lr} records)."),
         "verified": "Verification: measured again on the output table: passed",
         "relax": "Relaxations: {items}",
         "relax_none": "Relaxations: none",
+        "diag_infeasible": "Diagnostics: {records} record(s) in the table; requested k = {k}",
+        "diag_sens": "  \"{col}\": {v} distinct value(s) (requested l = {l})",
+        "diag_limit": "Diagnostics: lattice {nodes} node(s) (levels per QI: {tops}); evaluations used {evals} of {max_evals}.",
+        "diag_verification": ("Diagnostics: {crowds} crowd(s) in the output; {bc} smaller than k "
+                              "({br} records); {alone} alone in their crowd."),
+        "diag_l_shortfall": "  \"{col}\": {c} crowd(s) short of l-diversity ({r} records)",
     },
     "ja": {
         "title": "Sieve Crowd {version}",
@@ -69,9 +77,16 @@ _MSG = {
         "order_shuffled": "行の順序: シャッフル済み（シード {seed}）",
         "order_kept": "行の順序: 入力のまま",
         "loss": "情報の損失: 一般化 {h}/{H} 段階、除外 {pct:.1f}%",
+        "suppression_detail": ("除外の内訳: {crowds} 群れ・{records} 件 — k 未満 {kc} 群れ（{kr} 件）、"
+                               "多様性不足 {lc} 群れ（{lr} 件）。"),
         "verified": "検証: 出力の表で再測定し、合格しました",
         "relax": "緩和: {items}",
         "relax_none": "緩和: なし",
+        "diag_infeasible": "診断: 表のレコードは {records} 件、要求 k = {k}",
+        "diag_sens": "  「{col}」: 異なる値 {v} 種類（要求 l = {l}）",
+        "diag_limit": "診断: 格子 {nodes} ノード（QIごとの段数 {tops}）、使用した評価 {evals}（上限 {max_evals}）",
+        "diag_verification": "診断: 出力に群れ {crowds} 個、k 未満の群れ {bc} 個（{br} 件）、一独りのレコード {alone} 件。",
+        "diag_l_shortfall": "  「{col}」: 多様性が l 未満の群れ {c} 個（{r} 件）",
     },
 }
 
@@ -89,6 +104,22 @@ class Report:
                  ("Status: " if lang == "en" else "状態: ") + m["status"][d["status"]]]
         if d["status"] == "refused":
             lines.append(("Reason: " if lang == "en" else "理由: ") + m["reason"][d["reason"]])
+            dg = d.get("diagnostics")
+            if dg:
+                if d["reason"] == "infeasible":
+                    lines.append(m["diag_infeasible"].format(records=dg["records"], k=dg["k_requested"]))
+                    for col, v in dg.get("sensitive_distinct", {}).items():
+                        lines.append(m["diag_sens"].format(col=col, v=v, l=dg["l_requested"]))
+                elif d["reason"] == "resource_limit_search":
+                    lines.append(m["diag_limit"].format(nodes=dg["lattice_nodes"], tops=dg["tops"],
+                                                        evals=dg["evaluations"], max_evals=dg["max_evals"]))
+                elif d["reason"] == "verification_failed":
+                    lines.append(m["diag_verification"].format(
+                        crowds=dg["crowds"],
+                        bc=sum(c for _s, c in dg["crowd_sizes_below_k"]), br=dg["records_below_k"],
+                        alone=dg["records_alone"]))
+                    for col, e in dg.get("l_shortfalls", {}).items():
+                        lines.append(m["diag_l_shortfall"].format(col=col, c=e["crowds"], r=e["records"]))
             return "\n".join(lines)
         r = d["result"]
         lines.append(m["records"].format(n_in=d["input"]["records"], n_out=r["records_out"],
@@ -125,6 +156,12 @@ class Report:
                      else m["order_kept"])
         loss = d["information_loss"]
         lines.append(m["loss"].format(h=loss["height"], H=loss["max_height"], pct=100 * r["suppression_rate"]))
+        sup = d.get("diagnostics", {}).get("suppression")
+        if sup:
+            bk, bl = sup["reasons"]["below_k"], sup["reasons"]["below_l"]
+            lines.append(m["suppression_detail"].format(
+                crowds=sup["dropped_crowds"], records=sup["dropped_records"],
+                kc=bk["crowds"], kr=bk["records"], lc=bl["crowds"], lr=bl["records"]))
         lines.append(m["verified"])
         lines.append(m["relax"].format(items=", ".join(d["relaxations"])) if d["relaxations"]
                      else m["relax_none"])

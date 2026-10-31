@@ -4,12 +4,13 @@ from __future__ import annotations
 import math
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from .config import Config
 from .generalize import Generalizer, make_generalizer
-from .measure import measure
+from .measure import HISTOGRAM_CAP, diagnose, measure
 from .model import ConfigError, Role
 from .prng import SplitMix64
 from .pseudonym import pseudonym
@@ -30,11 +31,62 @@ def _norm(v: str) -> str:
 
 
 def _refuse(reason: str, n_in: int, cfg: Config,
-            io: Optional[tuple[str, Optional[str]]] = None) -> Result:
+            io: Optional[tuple[str, Optional[str]]] = None,
+            diagnostics: Optional[dict] = None) -> Result:
     d = base("refused", reason=reason)
     d["input"] = {"records": n_in}
+    if diagnostics:
+        d["diagnostics"] = diagnostics
     _add_io(d, io)
     return Result("refused", None, None, Report(d))
+
+
+def _capped_hist(counter: dict) -> tuple[list, bool]:
+    items = sorted(counter.items())
+    return [list(p) for p in items[:HISTOGRAM_CAP]], len(items) > HISTOGRAM_CAP
+
+
+def _suppression_diagnostics(searcher: Searcher, levels: tuple[int, ...], qi_cols: list[str],
+                             sens_cols: list[str], sens_codes: list[list[int]],
+                             dropped: tuple[int, ...]) -> dict:
+    """Why rows were dropped, in aggregates only: sizes and violation counts, never crowd labels."""
+    keys = searcher.keys(levels)
+    sizes = Counter(keys)
+    dropped_keys = {keys[i] for i in dropped}
+    hist, truncated = _capped_hist(Counter(sizes[key] for key in dropped_keys))
+    bk_c = bk_r = bl_c = bl_r = 0
+    columns: dict[str, dict[str, int]] = {}
+    for key in dropped_keys:
+        s = sizes[key]
+        if s < searcher.k:
+            bk_c += 1
+            bk_r += s
+            continue
+        bl_c += 1
+        bl_r += s
+        for name, sc in zip(sens_cols, sens_codes):
+            if len({sc[i] for i, kx in enumerate(keys) if kx == key}) < searcher.l:
+                e = columns.setdefault(name, {"crowds": 0, "records": 0})
+                e["crowds"] += 1
+                e["records"] += s
+    rescued: dict[str, int] = {}
+    for j, c in enumerate(qi_cols):
+        if levels[j] >= searcher.tops[j]:
+            continue
+        vec = levels[:j] + (levels[j] + 1,) + levels[j + 1:]
+        keys2 = searcher.keys(vec)
+        _sizes2, bad2 = searcher._bad_classes(keys2)
+        rescued[c] = sum(1 for i in dropped if keys2[i] not in bad2)
+    out = {
+        "budget": searcher.budget,
+        "dropped_crowds": len(dropped_keys), "dropped_records": len(dropped),
+        "crowd_sizes": hist, "crowd_sizes_truncated": truncated,
+        "reasons": {"below_k": {"crowds": bk_c, "records": bk_r},
+                    "below_l": {"crowds": bl_c, "records": bl_r, "columns": columns}},
+    }
+    if rescued:
+        out["one_level_further"] = rescued
+    return out
 
 
 def _add_io(d: dict, io: Optional[tuple[str, Optional[str]]]) -> None:
@@ -100,9 +152,15 @@ def anonymize(header: Sequence[str], rows: Sequence[Sequence[str]], cfg: Config,
     try:
         found = searcher.run()
     except Infeasible:
-        return _refuse("infeasible", n, cfg, io)
+        sens_distinct = {c: len({_norm(r[pos[c]]) for r in rows}) for c in sens_cols}
+        return _refuse("infeasible", n, cfg, io,
+                       {"records": n, "k_requested": cfg.k, "l_requested": cfg.l,
+                        "sensitive_distinct": sens_distinct})
     except SearchLimitExceeded:
-        return _refuse("resource_limit_search", n, cfg, io)
+        return _refuse("resource_limit_search", n, cfg, io,
+                       {"lattice_nodes": math.prod(t + 1 for t in searcher.tops),
+                        "tops": list(searcher.tops), "evaluations": searcher.evals,
+                        "max_evals": cfg.max_evals})
 
     # --- build the output table --------------------------------------------------------
     dropped = set(found.suppressed)
@@ -137,7 +195,9 @@ def anonymize(header: Sequence[str], rows: Sequence[Sequence[str]], cfg: Config,
     # --- verify on the output itself ---------------------------------------------------
     m = measure(out_header, out_rows, qi_cols, sens_cols)
     if m["k"] < cfg.k or any(v < cfg.l for v in m["diversity"].values()) or m["records"] == 0:
-        return _refuse("verification_failed", n, cfg, io)
+        diag = diagnose(out_header, out_rows, qi_cols, sens_cols, cfg.k, cfg.l)
+        diag["levels"] = list(found.levels)
+        return _refuse("verification_failed", n, cfg, io, diag)
 
     # --- receipt -----------------------------------------------------------------------
     before = measure(header, rows, qi_cols, [])
@@ -179,6 +239,9 @@ def anonymize(header: Sequence[str], rows: Sequence[Sequence[str]], cfg: Config,
     d["order"] = {"shuffled": cfg.shuffle, "seed": cfg.shuffle_seed if cfg.shuffle else None}
     d["relaxations"] = [] if cfg.shuffle else ["keep_order"]
     d["search"] = {"evaluations": found.evaluations, "refinement_truncated": found.truncated}
+    if dropped:
+        d["diagnostics"] = {"suppression": _suppression_diagnostics(
+            searcher, found.levels, qi_cols, sens_cols, sens_codes, dropped)}
     d["verification"] = "passed"
     _add_io(d, io)
     return Result("anonymized", out_header, out_rows, Report(d))

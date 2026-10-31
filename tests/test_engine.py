@@ -4,6 +4,7 @@ import hmac
 import json
 import unicodedata
 import unittest
+from unittest import mock
 
 from sieve_crowd import ConfigError, anonymize, parse_config, parse_key
 
@@ -180,6 +181,90 @@ class Independent(unittest.TestCase):
         self.assertGreaterEqual(min(counts.values()), 7)
         self.assertGreaterEqual(min(len(s) for s in sens.values()), 2)
         self.assertEqual(r.report.data["privacy"]["k_achieved"], min(counts.values()))
+
+
+class Diagnostics(unittest.TestCase):
+    """Aggregate-only traces in the receipt: why rows were dropped, why a run was refused."""
+
+    COLS = {
+        "age": {"role": "qi", "type": "numeric", "widths": [5, 10]},
+        "zip": {"role": "qi", "type": "prefix", "length": 2},
+        "dis": {"role": "sensitive"},
+    }
+    ROWS = [["30", "123", "a"], ["31", "123", "b"], ["32", "124", "a"], ["33", "124", "b"],
+            ["40", "130", "a"], ["41", "130", "a"], ["70", "999", "a"], ["72", "998", "b"]]
+
+    def test_suppression_breakdown_is_consistent_and_value_free(self):
+        r = anonymize(["age", "zip", "dis"], self.ROWS,
+                      cfg(self.COLS, k=2, l=2, max_suppression=0.5, shuffle=False))
+        self.assertEqual(r.status, "anonymized")
+        sup = r.report.data["diagnostics"]["suppression"]
+        self.assertEqual(sup["budget"], 4)
+        self.assertEqual(sup["dropped_records"], r.report.data["result"]["suppressed"])
+        self.assertEqual(sup["dropped_records"], 4)
+        self.assertEqual(sup["dropped_crowds"], 3)
+        self.assertEqual(sup["crowd_sizes"], [[1, 2], [2, 1]])
+        self.assertFalse(sup["crowd_sizes_truncated"])
+        bk, bl = sup["reasons"]["below_k"], sup["reasons"]["below_l"]
+        self.assertEqual((bk["crowds"], bk["records"]), (2, 2))
+        self.assertEqual((bl["crowds"], bl["records"]), (1, 2))
+        self.assertEqual(bl["columns"], {"dis": {"crowds": 1, "records": 2}})
+        self.assertEqual(bk["crowds"] + bl["crowds"], sup["dropped_crowds"])
+        self.assertEqual(bk["records"] + bl["records"], sup["dropped_records"])
+        self.assertEqual(sup["one_level_further"], {"age": 0, "zip": 2})
+        blob = r.report.to_json() + r.report.text("en") + r.report.text("ja")
+        for marker in ("999", "998", "70-74", "130"):      # dropped crowds' labels/values stay hidden
+            self.assertNotIn(marker, blob)
+        self.assertIn("Suppression detail: 3 crowd(s), 4 record(s)", r.report.text("en"))
+        self.assertIn("除外の内訳", r.report.text("ja"))
+
+    def test_no_diagnostics_when_nothing_is_dropped(self):
+        rows = [["30", "123", "a"], ["31", "123", "b"], ["32", "124", "a"], ["33", "124", "b"]]
+        r = anonymize(["age", "zip", "dis"], rows, cfg(self.COLS, k=2, shuffle=False))
+        self.assertEqual(r.report.data["result"]["suppressed"], 0)
+        self.assertNotIn("diagnostics", r.report.data)
+
+    def test_infeasible_diagnostics(self):
+        cols = {"a": {"role": "qi", "type": "exact"}, "s": {"role": "sensitive"}}
+        rows = [["x", "p"], ["x", "p"], ["x", "q"]]
+        r = anonymize(["a", "s"], rows, cfg(cols, k=5, l=4))
+        self.assertEqual(r.report.data["reason"], "infeasible")
+        dg = r.report.data["diagnostics"]
+        self.assertEqual((dg["records"], dg["k_requested"], dg["l_requested"]), (3, 5, 4))
+        self.assertEqual(dg["sensitive_distinct"], {"s": 2})
+        self.assertIn("Diagnostics: 3 record(s)", r.report.text("en"))
+        self.assertIn("診断", r.report.text("ja"))
+
+    def test_resource_limit_diagnostics(self):
+        cols = {"a": {"role": "qi", "type": "numeric", "widths": [2, 4, 8, 16, 32, 64]},
+                "b": {"role": "qi", "type": "numeric", "widths": [2, 4, 8, 16, 32, 64]}}
+        rows = [[str(i), str(i * 7)] for i in range(50)]
+        r = anonymize(["a", "b"], rows, cfg(cols, k=50, max_suppression=0.0, max_evals=3))
+        self.assertEqual(r.report.data["reason"], "resource_limit_search")
+        dg = r.report.data["diagnostics"]
+        self.assertEqual((dg["lattice_nodes"], dg["tops"], dg["max_evals"]), (64, [7, 7], 3))
+        self.assertGreaterEqual(dg["evaluations"], 3)
+        self.assertIn("lattice 64 node(s)", r.report.text("en"))
+
+    def test_verification_failed_diagnostics(self):
+        from sieve_crowd import engine
+        real = engine.measure
+
+        def lying(*a, **kw):
+            m = dict(real(*a, **kw))
+            m["k"] = min(m["k"], 1)                  # force the safety net to trip
+            return m
+
+        cols = {"a": {"role": "qi", "type": "exact"}, "s": {"role": "sensitive"}}
+        rows = [["x", "p"], ["x", "q"], ["x", "p"], ["x", "q"], ["x", "p"]]
+        with mock.patch.object(engine, "measure", lying):
+            r = anonymize(["a", "s"], rows, cfg(cols, k=2, shuffle=False))
+        self.assertEqual((r.status, r.report.data["reason"]), ("refused", "verification_failed"))
+        dg = r.report.data["diagnostics"]
+        self.assertEqual(dg["levels"], [0])
+        self.assertEqual((dg["records"], dg["crowds"], dg["records_alone"]), (5, 1, 0))
+        self.assertEqual(dg["crowd_sizes_below_k"], [])
+        self.assertIn("Diagnostics: 1 crowd(s) in the output", r.report.text("en"))
 
 
 class BeforeAfter(unittest.TestCase):
