@@ -267,6 +267,71 @@ class Diagnostics(unittest.TestCase):
         self.assertIn("Diagnostics: 1 crowd(s) in the output", r.report.text("en"))
 
 
+class MissingValuePolicy(unittest.TestCase):
+    """#9: what happens to records whose quasi-identifier value is empty."""
+
+    COLS = {"a": {"role": "qi", "type": "exact"}, "s": {"role": "sensitive"}}
+
+    def test_default_is_star_and_other_policies_are_rejected(self):
+        rows = [["x", "p"], ["", "q"], ["y", "p"], ["y", "q"]]
+        r = anonymize(["a", "s"], rows, cfg(self.COLS, k=2, shuffle=False))
+        self.assertEqual(r.report.data["settings"]["missing_value_policy"], "star")
+        self.assertEqual(r.report.data["result"]["missing_suppressed"], 0)
+        self.assertEqual(len(r.rows), 4)                       # nothing is dropped up front
+        self.assertEqual({row[0] for row in r.rows}, {"*"})    # the missing value generalized
+        for bad in ("placeholder", "drop", ""):
+            with self.assertRaises(ConfigError):
+                parse_config({"columns": self.COLS, "missing_value_policy": bad})
+
+    def test_suppress_drops_missing_rows_and_counts_them(self):
+        rows = [["x", "p"], ["x", "q"], ["y", "p"], ["y", "q"], ["", "p"]]
+        r = anonymize(["a", "s"], rows,
+                      cfg(self.COLS, k=2, max_suppression=0.4, missing_value_policy="suppress",
+                          shuffle=False))
+        self.assertEqual(r.status, "anonymized")
+        self.assertEqual(r.report.data["result"]["missing_suppressed"], 1)
+        self.assertEqual(r.report.data["result"]["suppressed"], 1)
+        self.assertEqual(len(r.rows), 4)
+        self.assertNotIn("", [row[0] for row in r.rows])
+        self.assertIn("dropped up front", r.report.text("en"))
+        self.assertIn("空値として検索前に除外", r.report.text("ja"))
+
+    def test_missing_over_budget_refuses(self):
+        rows = [["", "p"], ["", "q"], ["", "p"], ["x", "p"]]
+        r = anonymize(["a", "s"], rows,
+                      cfg(self.COLS, k=2, max_suppression=0.25, missing_value_policy="suppress",
+                          shuffle=False))
+        self.assertEqual((r.status, r.report.data["reason"]), ("refused", "missing_exceeds_budget"))
+        dg = r.report.data["diagnostics"]
+        self.assertEqual((dg["records"], dg["missing"], dg["budget"]), (4, 3, 1))
+        self.assertIn("empty quasi-identifier value", r.report.text("en"))
+        self.assertIn("空値", r.report.text("ja"))
+
+    def test_suppress_shares_the_budget_with_the_search(self):
+        cols = {"a": {"role": "qi", "type": "exact"}}
+        rows = [["s1"], ["s2"], ["a"], ["a"], ["b"], ["b"], ["c"], ["c"]]
+        full = anonymize(["a"], rows, cfg(cols, k=2, max_suppression=0.25, shuffle=False))
+        self.assertEqual((full.report.data["columns"][0]["level"],
+                          full.report.data["result"]["suppressed"]), (0, 2))
+        r = anonymize(["a"], rows + [[""]],
+                      cfg(cols, k=2, max_suppression=0.25, missing_value_policy="suppress",
+                          shuffle=False))
+        self.assertEqual(r.report.data["result"]["missing_suppressed"], 1)
+        self.assertEqual(r.report.data["columns"][0]["level"], 1)   # one slot eaten: generalize
+        self.assertEqual(r.report.data["result"]["suppressed"], 1)
+
+    def test_plan_reports_missing_and_warns_over_budget(self):
+        rows = [["", "p"], ["", "q"], ["x", "p"]]
+        c = cfg(self.COLS, k=2, max_suppression=0.1, missing_value_policy="suppress")
+        p = plan_table(["a", "s"], rows, c)
+        self.assertEqual(p["missing"], {"policy": "suppress", "records": 2})
+        self.assertEqual([w["code"] for w in p["warnings"]], ["budget_zero", "missing_over_budget"])
+        self.assertEqual(p["warnings"][-1]["params"], {"records": 2, "budget": 0})
+        star = plan_table(["a", "s"], rows, cfg(self.COLS, k=2, max_suppression=0.1))
+        self.assertEqual(star["missing"], {"policy": "star", "records": 2})
+        self.assertEqual([w["code"] for w in star["warnings"]], ["budget_zero"])
+
+
 class Plan(unittest.TestCase):
     """The pre-flight profile: exact search-space numbers, level-0 statistics, warnings."""
 

@@ -19,6 +19,8 @@ _MSG = {
             "resource_limit_search": "the search needed more steps than the configured limit; use fewer or coarser quasi-identifiers",
             "infeasible": "k (and l) cannot be reached for this table, even with every quasi-identifier suppressed",
             "verification_failed": "the measurement on the output did not confirm the requested k / l",
+            "missing_exceeds_budget": ("more records have an empty quasi-identifier value than the suppression "
+                                       "budget allows (policy 'suppress'); raise max_suppression or use 'star'"),
         },
         "records": "Records: {n_in} in, {n_out} out ({sup} suppressed, {pct:.1f}%)",
         "format_in": "Format: {fmt} in",
@@ -49,9 +51,11 @@ _MSG = {
         "diag_verification": ("Diagnostics: {crowds} crowd(s) in the output; {bc} smaller than k "
                               "({br} records); {alone} alone in their crowd."),
         "diag_l_shortfall": "  \"{col}\": {c} crowd(s) short of l-diversity ({r} records)",
+        "diag_missing": "Diagnostics: {m} of {records} record(s) have an empty quasi-identifier value; the budget is {budget}.",
         "plan_records": "Records: {n} in, columns: {cols}",
         "plan_lattice": "Search space: {nodes} nodes (max height {h}) on: {cols}",
         "plan_budget": "Suppression budget: {b} of {n} records ({pct:.1f}%)",
+        "plan_missing": "Missing quasi-identifier values: {m} of {n} record(s) (policy: {policy})",
         "plan_before": ("Level 0 (no generalization): {a} of {n} records ({p:.0%}) are one-of-a-kind "
                         "on those columns; {below} records are in crowds smaller than k."),
         "plan_sens": "  \"{col}\": {v} distinct value(s) (l = {l})",
@@ -67,6 +71,10 @@ _MSG = {
         "warn_evals_tight": ("the lattice has up to {nodes} nodes but max_evals is {max_evals}: "
                              "the search may stop with resource_limit_search."),
         "warn_many_singletons": "{records} record(s) ({ratio:.0%}) are one-of-a-kind on the QI columns: expect heavy generalization.",
+        "warn_missing_over_budget": ("{records} record(s) have an empty quasi-identifier value but the suppression "
+                                     "budget is {budget}: a run will refuse with missing_exceeds_budget."),
+        "missing_note": ("  of the {total} suppressed record(s), {m} were dropped up front: empty "
+                         "quasi-identifier value (policy 'suppress')."),
     },
     "ja": {
         "title": "Sieve Crowd {version}",
@@ -78,6 +86,8 @@ _MSG = {
             "resource_limit_search": "探索が設定の上限を超えました。準識別子の数を減らすか、粗くしてください",
             "infeasible": "すべての準識別子を隠しても、この表ではkまたはlを満たせません",
             "verification_failed": "出力の測定で、要求したkまたはlを確認できませんでした",
+            "missing_exceeds_budget": ("準識別子が空のレコードが除外予算を超えています（方針 suppress）。"
+                                       "max_suppression を上げるか、方針を star にしてください"),
         },
         "records": "レコード: 入力 {n_in} 件、出力 {n_out} 件（除外 {sup} 件、{pct:.1f}%）",
         "format_in": "形式: 入力 {fmt}",
@@ -107,9 +117,11 @@ _MSG = {
         "diag_limit": "診断: 格子 {nodes} ノード（QIごとの段数 {tops}）、使用した評価 {evals}（上限 {max_evals}）",
         "diag_verification": "診断: 出力に群れ {crowds} 個、k 未満の群れ {bc} 個（{br} 件）、一独りのレコード {alone} 件。",
         "diag_l_shortfall": "  「{col}」: 多様性が l 未満の群れ {c} 個（{r} 件）",
+        "diag_missing": "診断: {records} 件中 {m} 件に準識別子の空値があり、除外予算は {budget} 件です。",
         "plan_records": "レコード: 入力 {n} 件、列数 {cols}",
         "plan_lattice": "探索空間: 準識別子 {cols} の格子は {nodes} ノード（最大の高さ {h}）",
         "plan_budget": "除外の上限: {n} 件中 {b} 件（{pct:.1f}%）",
+        "plan_missing": "準識別子の空値: {n} 件中 {m} 件（方針: {policy}）",
         "plan_before": "段階0（そのまま）では、{n} 件中 {a} 件（{p:.0%}）が一独りで、k 未満の群れに属するレコードは {below} 件です。",
         "plan_sens": "  「{col}」: 異なる値 {v} 種類（l = {l}）",
         "plan_warnings": "警告:",
@@ -121,6 +133,8 @@ _MSG = {
         "warn_lattice_large": "格子は {nodes} ノードで上限 {cap} を超えるため、改善フェーズは省略され、結果が厳密な最適にならないことがあります。",
         "warn_evals_tight": "格子は最大 {nodes} ノードに対し max_evals が {max_evals} のため、探索が resource_limit_search で打ち切られる可能性があります。",
         "warn_many_singletons": "QI 列だけで一独りのレコードが {records} 件（{ratio:.0%}）です。強い一般化が必要になる見込みです。",
+        "warn_missing_over_budget": "準識別子が空のレコードが {records} 件ありますが、除外予算は {budget} 件です。実行すると missing_exceeds_budget で拒否されます。",
+        "missing_note": "  除外 {total} 件のうち {m} 件は、準識別子の空値として検索前に除外されました（方針 suppress）。",
     },
 }
 
@@ -154,6 +168,9 @@ class Report:
                         alone=dg["records_alone"]))
                     for col, e in dg.get("l_shortfalls", {}).items():
                         lines.append(m["diag_l_shortfall"].format(col=col, c=e["crowds"], r=e["records"]))
+                elif d["reason"] == "missing_exceeds_budget":
+                    lines.append(m["diag_missing"].format(m=dg["missing"], records=dg["records"],
+                                                          budget=dg["budget"]))
             return "\n".join(lines)
         if d["status"] == "plan":
             p, b = d["lattice"], d["budget"]
@@ -162,6 +179,10 @@ class Report:
                                                   cols=", ".join(p["quasi_identifiers"])))
             lines.append(m["plan_budget"].format(b=b["records"], n=d["input"]["records"],
                                                  pct=100 * b["max_suppression"]))
+            if d["missing"]["records"]:
+                lines.append(m["plan_missing"].format(m=d["missing"]["records"],
+                                                      n=d["input"]["records"],
+                                                      policy=d["missing"]["policy"]))
             bf = d["before"]
             lines.append(m["plan_before"].format(a=bf["records_alone"], n=d["input"]["records"],
                                                  p=bf["records_alone_ratio"], below=bf["records_below_k"]))
@@ -216,6 +237,8 @@ class Report:
             lines.append(m["suppression_detail"].format(
                 crowds=sup["dropped_crowds"], records=sup["dropped_records"],
                 kc=bk["crowds"], kr=bk["records"], lc=bl["crowds"], lr=bl["records"]))
+        if r.get("missing_suppressed"):
+            lines.append(m["missing_note"].format(total=r["suppressed"], m=r["missing_suppressed"]))
         lines.append(m["verified"])
         lines.append(m["relax"].format(items=", ".join(d["relaxations"])) if d["relaxations"]
                      else m["relax_none"])

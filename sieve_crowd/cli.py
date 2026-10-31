@@ -70,6 +70,9 @@ def _parser() -> argparse.ArgumentParser:
     r.add_argument("--k", type=int)
     r.add_argument("--l", type=int)
     r.add_argument("--max-suppression", type=float)
+    r.add_argument("--missing-value-policy", choices=["star", "suppress"],
+                   help="what to do with records whose QI value is empty: generalize it to '*' "
+                        "(star, default) or drop the record against the suppression budget (suppress)")
     r.add_argument("--keep-order", action="store_true", help="relaxation: do not shuffle the rows (recorded)")
     r.add_argument("--shuffle-seed", type=int, default=0)
     r.add_argument("--lang", choices=["en", "ja"], default="en")
@@ -90,6 +93,7 @@ def _parser() -> argparse.ArgumentParser:
     pl.add_argument("--k", type=int)
     pl.add_argument("--l", type=int)
     pl.add_argument("--max-suppression", type=float)
+    pl.add_argument("--missing-value-policy", choices=["star", "suppress"])
     pl.add_argument("--max-rows", type=int, default=200_000)
     pl.add_argument("--max-evals", type=int, default=20_000)
     pl.add_argument("--key-file")
@@ -170,6 +174,7 @@ def _load_config(a: argparse.Namespace):
         raw = json.loads(fh.read().decode("utf-8-sig"))
     key = parse_key(open(a.key_file, encoding="utf-8").read()) if a.key_file else None
     return parse_config(raw, k=a.k, l=a.l, max_suppression=a.max_suppression,
+                        missing_value_policy=getattr(a, "missing_value_policy", None),
                         shuffle=not getattr(a, "keep_order", False),
                         shuffle_seed=getattr(a, "shuffle_seed", 0), lang=a.lang,
                         max_rows=a.max_rows, max_evals=a.max_evals, key=key)

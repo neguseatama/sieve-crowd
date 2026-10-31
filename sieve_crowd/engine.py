@@ -123,13 +123,30 @@ def anonymize(header: Sequence[str], rows: Sequence[Sequence[str]], cfg: Config,
     qi_cols = [h for h in header if cfg.columns[h].role is Role.QI]
     sens_cols = [h for h in header if cfg.columns[h].role is Role.SENSITIVE]
 
+    # --- missing-value policy ----------------------------------------------------------
+    # "star" (default): a missing QI value takes part like any value and generalizes to "*"
+    # from level 1.  "suppress": records with an empty QI value are removed before the search
+    # and consume the suppression budget; they refuse the run when they alone exceed it.
+    budget = min(n - 1, int(math.floor(cfg.max_suppression * n)))
+    missing: list[int] = []
+    work = rows
+    if cfg.missing_value_policy == "suppress":
+        missing = [i for i, r in enumerate(rows) if any(_norm(r[pos[c]]) == "" for c in qi_cols)]
+        if len(missing) > budget:
+            return _refuse("missing_exceeds_budget", n, cfg, io,
+                           {"records": n, "missing": len(missing), "budget": budget})
+        budget -= len(missing)
+        if missing:
+            gone = set(missing)
+            work = [r for i, r in enumerate(rows) if i not in gone]
+
     # --- generalization tables ---------------------------------------------------------
     gens: list[Generalizer] = []
     values: list[list[str]] = []
     codes: list[list[list[int]]] = []
     cards: list[list[int]] = []
     for c in qi_cols:
-        col = [_norm(r[pos[c]]) for r in rows]
+        col = [_norm(r[pos[c]]) for r in work]
         distinct = list(dict.fromkeys(col))
         g = make_generalizer(cfg.columns[c].gen or {})
         g.prepare(distinct)
@@ -144,11 +161,10 @@ def anonymize(header: Sequence[str], rows: Sequence[Sequence[str]], cfg: Config,
     sens_codes: list[list[int]] = []
     for c in sens_cols:
         ids2: dict[str, int] = {}
-        sens_codes.append([ids2.setdefault(_norm(r[pos[c]]), len(ids2)) for r in rows])
+        sens_codes.append([ids2.setdefault(_norm(r[pos[c]]), len(ids2)) for r in work])
 
     # --- search ------------------------------------------------------------------------
-    budget = min(n - 1, int(math.floor(cfg.max_suppression * n)))
-    searcher = Searcher(codes, cards, sens_codes, n, cfg.k, cfg.l, budget, cfg.max_evals)
+    searcher = Searcher(codes, cards, sens_codes, len(work), cfg.k, cfg.l, budget, cfg.max_evals)
     try:
         found = searcher.run()
     except Infeasible:
@@ -175,7 +191,7 @@ def anonymize(header: Sequence[str], rows: Sequence[Sequence[str]], cfg: Config,
                   if cfg.columns[h].role not in (Role.DROP,)
                   and not (cfg.columns[h].role is Role.ID and cfg.columns[h].action == "drop")]
     out_rows: list[list[str]] = []
-    for ri, r in enumerate(rows):
+    for ri, r in enumerate(work):
         if ri in dropped:
             continue
         out = []
@@ -220,9 +236,12 @@ def anonymize(header: Sequence[str], rows: Sequence[Sequence[str]], cfg: Config,
 
     d = base("anonymized")
     d["input"] = {"records": n, "columns": len(header)}
-    d["settings"] = {"k": cfg.k, "l": cfg.l, "max_suppression": cfg.max_suppression}
-    d["result"] = {"records_out": len(out_rows), "suppressed": len(dropped),
-                   "suppression_rate": len(dropped) / n}
+    d["settings"] = {"k": cfg.k, "l": cfg.l, "max_suppression": cfg.max_suppression,
+                     "missing_value_policy": cfg.missing_value_policy}
+    d["result"] = {"records_out": len(out_rows),
+                   "suppressed": len(missing) + len(dropped),
+                   "suppression_rate": (len(missing) + len(dropped)) / n,
+                   "missing_suppressed": len(missing)}
     d["privacy"] = {
         "quasi_identifiers": qi_cols,
         "k_requested": cfg.k, "k_achieved": m["k"], "crowds": m["crowds"],
@@ -282,6 +301,9 @@ def plan_table(header: Sequence[str], rows: Sequence[Sequence[str]], cfg: Config
             warn("l_unreachable", column=c, distinct=v, l=cfg.l)
     if budget == 0 and diag["records_below_k"] > 0:
         warn("budget_zero", records=diag["records_below_k"])
+    missing = sum(1 for r in rows if any(_norm(r[pos[c]]) == "" for c in qi_cols))
+    if cfg.missing_value_policy == "suppress" and missing > budget:
+        warn("missing_over_budget", records=missing, budget=budget)
     if nodes > REFINE_MAX_NODES:
         warn("lattice_large", nodes=nodes, cap=REFINE_MAX_NODES)
     if nodes > cfg.max_evals:
@@ -300,6 +322,7 @@ def plan_table(header: Sequence[str], rows: Sequence[Sequence[str]], cfg: Config
                     "refinement_skipped": nodes > REFINE_MAX_NODES,
                     "worst_case_evaluations": nodes}
     d["budget"] = {"records": budget, "max_suppression": cfg.max_suppression}
+    d["missing"] = {"policy": cfg.missing_value_policy, "records": missing}
     d["before"] = {"crowds": before["crowds"], "smallest_crowd": before["k"],
                    "records_alone": before["records_in_crowd_of_1"],
                    "records_alone_ratio": (before["records_in_crowd_of_1"] / n) if n else 0.0,

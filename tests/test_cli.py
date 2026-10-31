@@ -121,6 +121,21 @@ class CliTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("Relaxations: keep_order", err)
 
+    def test_missing_value_policy_flag(self):
+        src = self.write("miss.csv", b"a,s\nx,p\n,q\nx,q\ny,p\ny,q\n")
+        mcfg = self.write("m.json", json.dumps({"k": 2, "columns": {
+            "a": {"role": "qi", "type": "exact"}, "s": {"role": "sensitive"}}}).encode())
+        rc, _, err = call("plan", src, "-c", mcfg, "--max-suppression", "0.1",
+                          "--missing-value-policy", "suppress")
+        self.assertEqual(rc, 0)
+        self.assertIn("empty quasi-identifier value", err)
+        rc, _, _ = call("run", src, "-c", mcfg, "-o", self.path("o.csv"), "--max-suppression", "0.2",
+                        "--missing-value-policy", "suppress", "--quiet")
+        self.assertEqual(rc, 0)
+        rows = self.read("o.csv").decode().splitlines()[1:]
+        self.assertEqual(len(rows), 4)                          # the empty-QI record is gone
+        self.assertEqual({r.split(",")[0] for r in rows}, {"x", "y"})
+
 
 class InspectHintTests(unittest.TestCase):
     def test_hints_template_and_comment_keys(self):
