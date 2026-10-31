@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from sieve_crowd.generalize import CategoryGen, DateGen, NumericGen, PrefixGen, make_generalizer
+from sieve_crowd.generalize import BinsGen, CategoryGen, DateGen, NumericGen, PrefixGen, make_generalizer
 from sieve_crowd.model import ConfigError
 
 
@@ -25,6 +25,46 @@ class NumericTests(unittest.TestCase):
         for bad in ([], [0], [5, 7], [10, 5], [5, 5], [2.5], [True]):
             with self.assertRaises(ConfigError):
                 NumericGen(bad)
+
+
+class BinsTests(unittest.TestCase):
+    def test_integer_labels_and_open_ends(self):
+        g = BinsGen([0, 20, 40, 65])
+        g.prepare(["5", "19", "20", "64", "65", "90", "-3"])
+        self.assertEqual(g.levels, 2)
+        self.assertEqual(g.label("19", 1), "0-19")
+        self.assertEqual(g.label("20", 1), "20-39")
+        self.assertEqual(g.label("64", 1), "40-64")
+        self.assertEqual(g.label("65", 1), "65+")
+        self.assertEqual(g.label("90", 1), "65+")
+        self.assertEqual(g.label("-3", 1), "<0")
+        self.assertEqual(g.label("", 1), "*")
+        self.assertEqual(g.label("abc", 1), "*")
+        self.assertEqual([g.label("40", l) for l in range(3)], ["40", "40-64", "*"])
+
+    def test_decimal_labels_use_edges_verbatim(self):
+        g = BinsGen([0.5, 20, 65.5])
+        g.prepare(["0.2", "3.0", "19.9", "70.0"])
+        self.assertEqual(g.label("0.2", 1), "<0.5")
+        self.assertEqual(g.label("3.0", 1), "[0.5,20)")
+        self.assertEqual(g.label("19.9", 1), "[0.5,20)")
+        self.assertEqual(g.label("70.0", 1), ">=65.5")
+
+    def test_integer_column_with_fractional_edges_is_rejected(self):
+        g = BinsGen([0, 19.5, 65])
+        with self.assertRaises(ConfigError):
+            g.prepare(["3", "40"])
+
+    def test_edge_validation(self):
+        for bad in ([], ["x"], [True], [float("nan")], [float("inf")], [5, 5], [10, 5], [3, 2.5]):
+            with self.assertRaises(ConfigError):
+                BinsGen(bad)
+
+    def test_make_generalizer_routing(self):
+        g = make_generalizer({"type": "numeric", "bins": [0, 20, 65]})
+        self.assertIsInstance(g, BinsGen)
+        with self.assertRaises(ConfigError):
+            make_generalizer({"type": "numeric", "widths": [5], "bins": [0, 20]})
 
 
 class DateTests(unittest.TestCase):
@@ -88,8 +128,10 @@ class CoarseningProperty(unittest.TestCase):
         rnd = random.Random(11)
         ints = [str(rnd.randint(-200, 200)) for _ in range(300)] + [""]
         self.check(NumericGen([2, 10, 20, 100]), ints)
+        self.check(BinsGen([0, 20, 40, 65]), [str(rnd.randint(-10, 90)) for _ in range(300)] + [""])
         decs = [f"{rnd.uniform(-50, 50):.2f}" for _ in range(300)]
         self.check(NumericGen([5, 10]), decs)
+        self.check(BinsGen([-12.5, 0, 17.5]), decs)
         dates = [f"{rnd.randint(1950, 2020)}-{rnd.randint(1, 12):02d}-{rnd.randint(1, 28):02d}" for _ in range(300)] + ["x"]
         self.check(DateGen(), dates)
         words = ["".join(rnd.choice("0123") for _ in range(rnd.randint(1, 5))) for _ in range(300)] + [""]

@@ -7,7 +7,7 @@ from collections import defaultdict
 from fractions import Fraction
 
 from sieve_crowd import Config, anonymize, parse_config
-from sieve_crowd.generalize import NumericGen, PrefixGen, CategoryGen
+from sieve_crowd.generalize import BinsGen, NumericGen, PrefixGen, CategoryGen
 
 HEADER = ["age", "zip", "sex", "dis"]
 COLS = {
@@ -16,19 +16,26 @@ COLS = {
     "sex": {"role": "qi", "type": "exact"},
     "dis": {"role": "sensitive"},
 }
+BINS_COLS = {
+    "age": {"role": "qi", "type": "numeric", "bins": [0, 20, 40, 65]},
+    "zip": {"role": "qi", "type": "prefix", "length": 2},
+    "sex": {"role": "qi", "type": "exact"},
+    "dis": {"role": "sensitive"},
+}
 
 
-def make_gens(rows):
-    gens = [NumericGen([2, 4, 8]), PrefixGen(2), CategoryGen(None)]
+def make_gens(rows, bins=False):
+    gens = [BinsGen([0, 20, 40, 65]), PrefixGen(2), CategoryGen(None)] if bins \
+        else [NumericGen([2, 4, 8]), PrefixGen(2), CategoryGen(None)]
     for i, g in enumerate(gens):
         g.prepare(list(dict.fromkeys(r[i] for r in rows)))
     return gens
 
 
-def oracle(rows, k, l, ms):
+def oracle(rows, k, l, ms, bins=False):
     n = len(rows)
     budget = min(n - 1, math.floor(ms * n))
-    gens = make_gens(rows)
+    gens = make_gens(rows, bins)
     tops = [g.levels for g in gens]
 
     def suppressed(vec):
@@ -52,15 +59,15 @@ def random_rows(rnd):
 
 
 class OracleTests(unittest.TestCase):
-    def test_engine_matches_brute_force(self):
-        rnd = random.Random(2026)
+    def _compare(self, cols, bins, rnd_seed, cases):
+        rnd = random.Random(rnd_seed)
         compared = refused = 0
-        for _ in range(250):
+        for _ in range(cases):
             rows = random_rows(rnd)
             k, l, ms = rnd.choice([2, 3, 4]), rnd.choice([1, 2]), rnd.choice([0.0, 0.1, 0.25])
-            cfg = parse_config({"columns": COLS}, k=k, l=l, max_suppression=ms)
+            cfg = parse_config({"columns": cols}, k=k, l=l, max_suppression=ms)
             res = anonymize(HEADER, rows, cfg)
-            expected = oracle(rows, k, l, ms)
+            expected = oracle(rows, k, l, ms, bins)
             if expected is None:
                 self.assertEqual((res.status, res.report.data["reason"]), ("refused", "infeasible"))
                 refused += 1
@@ -74,6 +81,12 @@ class OracleTests(unittest.TestCase):
             self.assertGreaterEqual(res.report.data["privacy"]["k_achieved"], k)
             compared += 1
         self.assertGreater(compared, 100)
+
+    def test_engine_matches_brute_force(self):
+        self._compare(COLS, False, 2026, 250)
+
+    def test_engine_matches_brute_force_with_custom_bins(self):
+        self._compare(BINS_COLS, True, 2027, 250)
 
     def test_acceptability_is_monotone(self):
         rnd = random.Random(99)

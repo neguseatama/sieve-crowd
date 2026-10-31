@@ -9,7 +9,7 @@ from .generalize import make_generalizer
 from .model import ConfigError, Role
 
 _TOP_KEYS = {"k", "l", "max_suppression", "columns"}
-_COL_KEYS = {"role", "action", "type", "widths", "length", "hierarchy"}
+_COL_KEYS = {"role", "action", "type", "widths", "length", "hierarchy", "bins"}
 _HEX = re.compile(r"^[0-9a-fA-F]{32,}$")
 
 
