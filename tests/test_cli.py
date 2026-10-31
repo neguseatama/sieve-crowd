@@ -154,5 +154,55 @@ class InspectHintTests(unittest.TestCase):
             self.assertIn("Before:", err)
 
 
+class PlanCliTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.d = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+        self.csv = self.write("in.csv", CSV.encode())
+        self.cfg = self.write("cfg.json", json.dumps(CONFIG).encode())
+
+    def path(self, n):
+        return os.path.join(self.d, n)
+
+    def write(self, n, data):
+        with open(self.path(n), "wb") as fh:
+            fh.write(data)
+        return self.path(n)
+
+    def read(self, n):
+        with open(self.path(n), "rb") as fh:
+            return fh.read()
+
+    def test_plan_reports_without_searching_or_writing(self):
+        rc, _, err = call("plan", self.csv, "-c", self.cfg, "--report-json", self.path("p.json"))
+        self.assertEqual(rc, 0)
+        self.assertIn("Search space", err)
+        self.assertIn("Suppression budget", err)
+        self.assertFalse(os.path.exists(self.path("out.csv")))
+        rep = json.loads(self.read("p.json"))
+        self.assertEqual(rep["status"], "plan")
+        self.assertEqual(rep["lattice"]["quasi_identifiers"], ["age", "zip"])
+        self.assertNotIn(b"Person", self.read("p.json"))
+
+    def test_plan_language_quiet_and_warnings(self):
+        rc, _, err = call("plan", self.csv, "-c", self.cfg, "--lang", "ja", "--k", "500")
+        self.assertEqual(rc, 0)
+        self.assertIn("探索空間", err)
+        self.assertIn("k = 500 には届きません", err)
+        rc, _, err = call("plan", self.csv, "-c", self.cfg, "--quiet")
+        self.assertEqual(rc, 0)
+        self.assertEqual(err, "")
+
+    def test_plan_error_paths(self):
+        rc, _, _ = call("plan", self.csv, "-c", self.path("missing.json"))
+        self.assertEqual(rc, 1)                    # unreadable config/key file: I/O, like run
+        rc, _, _ = call("plan", self.path("missing.csv"), "-c", self.cfg)
+        self.assertEqual(rc, 1)
+        bad = self.write("bad.json", b"{")
+        rc, _, _ = call("plan", self.csv, "-c", bad)
+        self.assertEqual(rc, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

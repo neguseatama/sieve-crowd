@@ -6,7 +6,7 @@ import unicodedata
 import unittest
 from unittest import mock
 
-from sieve_crowd import ConfigError, anonymize, parse_config, parse_key
+from sieve_crowd import ConfigError, anonymize, parse_config, parse_key, plan_table
 
 KEY = "00112233445566778899aabbccddeeff" * 2
 
@@ -265,6 +265,58 @@ class Diagnostics(unittest.TestCase):
         self.assertEqual((dg["records"], dg["crowds"], dg["records_alone"]), (5, 1, 0))
         self.assertEqual(dg["crowd_sizes_below_k"], [])
         self.assertIn("Diagnostics: 1 crowd(s) in the output", r.report.text("en"))
+
+
+class Plan(unittest.TestCase):
+    """The pre-flight profile: exact search-space numbers, level-0 statistics, warnings."""
+
+    COLS = {"age": {"role": "qi", "type": "numeric", "widths": [5, 10]},
+            "zip": {"role": "qi", "type": "prefix", "length": 2},
+            "dis": {"role": "sensitive"}}
+
+    def test_plan_numbers_are_exact_and_value_free(self):
+        rows = [["30", "123", "a"], ["31", "123", "b"], ["32", "124", "a"], ["70", "999", "a"]]
+        c = parse_config({"columns": self.COLS}, k=5, max_suppression=0.25)
+        p = plan_table(["age", "zip", "dis"], rows, c)
+        self.assertEqual(p["status"], "plan")
+        self.assertEqual((p["lattice"]["tops"], p["lattice"]["nodes"], p["lattice"]["max_height"]),
+                         ([3, 3], 16, 6))
+        self.assertEqual(p["budget"]["records"], 1)
+        self.assertEqual(p["before"]["records_alone"], 4)
+        self.assertEqual(p["before"]["records_below_k"], 4)
+        self.assertEqual([w["code"] for w in p["warnings"]], ["k_unreachable", "many_singletons"])
+        self.assertEqual(p["warnings"][0]["params"], {"records": 4, "k": 5})
+        blob = json.dumps(p, ensure_ascii=False)
+        for marker in ("999", "130"):
+            self.assertNotIn(marker, blob)
+        self.assertEqual(p, plan_table(["age", "zip", "dis"], rows, c))   # deterministic
+
+    def test_plan_matches_the_search_contract(self):
+        rows = [["30", "123", "a"], ["31", "123", "b"], ["32", "124", "a"], ["70", "999", "a"]]
+        c = parse_config({"columns": self.COLS}, k=2, max_suppression=0.25)
+        p = plan_table(["age", "zip", "dis"], rows, c)
+        r = anonymize(["age", "zip", "dis"], rows, parse_config({"columns": self.COLS},
+                                                                k=2, max_suppression=0.25, shuffle=False))
+        self.assertEqual(p["budget"]["records"], min(len(rows) - 1, int(0.25 * len(rows))))
+        self.assertEqual(r.status, "anonymized")
+        self.assertNotIn("warnings", r.report.data)     # plan-only section stays out of run receipts
+
+    def test_plan_warnings_cover_limits_and_l(self):
+        rows = [["30", "123", "a"], ["31", "123", "a"], ["32", "124", "a"], ["70", "999", "a"]]
+        c = parse_config({"columns": self.COLS}, k=2, l=3, max_suppression=0.0, max_rows=2, max_evals=10)
+        p = plan_table(["age", "zip", "dis"], rows, c)
+        codes = [w["code"] for w in p["warnings"]]
+        self.assertIn("rows_over_limit", codes)
+        self.assertIn("l_unreachable", codes)
+        self.assertIn("budget_zero", codes)
+        self.assertIn("evals_tight", codes)
+        lw = next(w for w in p["warnings"] if w["code"] == "l_unreachable")
+        self.assertEqual(lw["params"], {"column": "dis", "distinct": 1, "l": 3})
+
+    def test_plan_refuses_mismatched_columns(self):
+        c = parse_config({"columns": self.COLS})
+        with self.assertRaises(ConfigError):
+            plan_table(["age", "zip"], [["30", "123"]], c)
 
 
 class BeforeAfter(unittest.TestCase):

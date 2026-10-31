@@ -11,9 +11,10 @@ from typing import Optional, Sequence
 
 from . import __version__
 from .config import parse_config, parse_key
-from .engine import anonymize, inspect_table
+from .engine import anonymize, inspect_table, plan_table
 from .hints import hint
 from .model import ConfigError, InputError
+from .report import Report
 from .tableio import FORMATS, detect_format, read_any, write_any
 
 EXIT_OK, EXIT_IO, EXIT_CONFIG, EXIT_REFUSED = 0, 1, 2, 3
@@ -77,6 +78,23 @@ def _parser() -> argparse.ArgumentParser:
     r.add_argument("--report-json", metavar="FILE")
     r.add_argument("--quiet", action="store_true")
     r.add_argument("--force", action="store_true")
+
+    pl = sub.add_parser("plan", help="estimate the search before running: lattice size, suppression budget, "
+                                     "level-0 crowds and warnings (no table, no search)")
+    pl.add_argument("input")
+    pl.add_argument("-c", "--config", required=True)
+    pl.add_argument("--delimiter", help="CSV only")
+    pl.add_argument("--in-format", choices=FORMATS,
+                    help="force the input format (default: from the file extension)")
+    pl.add_argument("--lang", choices=["en", "ja"], default="en")
+    pl.add_argument("--k", type=int)
+    pl.add_argument("--l", type=int)
+    pl.add_argument("--max-suppression", type=float)
+    pl.add_argument("--max-rows", type=int, default=200_000)
+    pl.add_argument("--max-evals", type=int, default=20_000)
+    pl.add_argument("--key-file")
+    pl.add_argument("--report-json", metavar="FILE")
+    pl.add_argument("--quiet", action="store_true")
     return p
 
 
@@ -147,6 +165,16 @@ def _cmd_keygen(a: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _load_config(a: argparse.Namespace):
+    with open(a.config, "rb") as fh:
+        raw = json.loads(fh.read().decode("utf-8-sig"))
+    key = parse_key(open(a.key_file, encoding="utf-8").read()) if a.key_file else None
+    return parse_config(raw, k=a.k, l=a.l, max_suppression=a.max_suppression,
+                        shuffle=not getattr(a, "keep_order", False),
+                        shuffle_seed=getattr(a, "shuffle_seed", 0), lang=a.lang,
+                        max_rows=a.max_rows, max_evals=a.max_evals, key=key)
+
+
 def _cmd_run(a: argparse.Namespace) -> int:
     if not a.dry_run and not a.output:
         print("error: give -o/--output or --dry-run", file=sys.stderr); return EXIT_CONFIG
@@ -161,12 +189,7 @@ def _cmd_run(a: argparse.Namespace) -> int:
     except InputError as exc:
         print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
     try:
-        with open(a.config, "rb") as fh:
-            raw = json.loads(fh.read().decode("utf-8-sig"))
-        key = parse_key(open(a.key_file, encoding="utf-8").read()) if a.key_file else None
-        cfg = parse_config(raw, k=a.k, l=a.l, max_suppression=a.max_suppression,
-                           shuffle=not a.keep_order, shuffle_seed=a.shuffle_seed, lang=a.lang,
-                           max_rows=a.max_rows, max_evals=a.max_evals, key=key)
+        cfg = _load_config(a)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -201,6 +224,40 @@ def _cmd_run(a: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_plan(a: argparse.Namespace) -> int:
+    try:
+        in_fmt = _resolve_format(a.input, a.in_format, dash_default="csv")
+        delim = _delimiter(a.delimiter, {in_fmt})
+    except InputError as exc:
+        print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    try:
+        cfg = _load_config(a)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        print("error: the configuration is not valid JSON", file=sys.stderr); return EXIT_CONFIG
+    except OSError as exc:
+        print(f"error: cannot read the configuration or key ({exc.strerror})", file=sys.stderr); return EXIT_IO
+    try:
+        header, rows = read_any(_read(a.input), in_fmt, delim)
+    except InputError as exc:
+        print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    except OSError as exc:
+        print(f"error: cannot read the input ({exc.strerror})", file=sys.stderr); return EXIT_IO
+    try:
+        report = Report(plan_table(header, rows, cfg))
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    if not a.quiet:
+        print(report.text(cfg.lang), file=sys.stderr)
+    try:
+        if a.report_json:
+            _atomic_write(a.report_json, (report.to_json() + "\n").encode("utf-8"))
+    except OSError as exc:
+        print(f"error: cannot write ({exc.strerror})", file=sys.stderr); return EXIT_IO
+    return EXIT_OK
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     a = _parser().parse_args(argv)
-    return {"inspect": _cmd_inspect, "keygen": _cmd_keygen, "run": _cmd_run}[a.cmd](a)
+    return {"inspect": _cmd_inspect, "keygen": _cmd_keygen, "run": _cmd_run, "plan": _cmd_plan}[a.cmd](a)

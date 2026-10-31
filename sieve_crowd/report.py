@@ -11,7 +11,8 @@ from . import __version__
 _MSG = {
     "en": {
         "title": "Sieve Crowd {version}",
-        "status": {"anonymized": "anonymized", "refused": "refused (no output written)"},
+        "status": {"anonymized": "anonymized", "refused": "refused (no output written)",
+                   "plan": "plan (estimate only; nothing searched, nothing written)"},
         "reason": {
             "no_records": "the table has no records",
             "resource_limit_rows": "the table has more records than the configured limit",
@@ -48,10 +49,29 @@ _MSG = {
         "diag_verification": ("Diagnostics: {crowds} crowd(s) in the output; {bc} smaller than k "
                               "({br} records); {alone} alone in their crowd."),
         "diag_l_shortfall": "  \"{col}\": {c} crowd(s) short of l-diversity ({r} records)",
+        "plan_records": "Records: {n} in, columns: {cols}",
+        "plan_lattice": "Search space: {nodes} nodes (max height {h}) on: {cols}",
+        "plan_budget": "Suppression budget: {b} of {n} records ({pct:.1f}%)",
+        "plan_before": ("Level 0 (no generalization): {a} of {n} records ({p:.0%}) are one-of-a-kind "
+                        "on those columns; {below} records are in crowds smaller than k."),
+        "plan_sens": "  \"{col}\": {v} distinct value(s) (l = {l})",
+        "plan_warnings": "Warnings:",
+        "plan_no_warnings": "Warnings: none",
+        "warn_rows_over_limit": "the table has {records} record(s) (limit {max_rows}): a run will refuse with resource_limit_rows.",
+        "warn_k_unreachable": "k = {k} cannot be reached with {records} record(s).",
+        "warn_l_unreachable": "\"{column}\" has only {distinct} distinct value(s), so l = {l} cannot be reached.",
+        "warn_budget_zero": ("no suppression is allowed and {records} record(s) are already in crowds "
+                             "smaller than k at level 0: generalization alone must fix them."),
+        "warn_lattice_large": ("the lattice has {nodes} nodes (cap {cap}): the refinement phase will be "
+                               "skipped and the result may not be the absolute optimum."),
+        "warn_evals_tight": ("the lattice has up to {nodes} nodes but max_evals is {max_evals}: "
+                             "the search may stop with resource_limit_search."),
+        "warn_many_singletons": "{records} record(s) ({ratio:.0%}) are one-of-a-kind on the QI columns: expect heavy generalization.",
     },
     "ja": {
         "title": "Sieve Crowd {version}",
-        "status": {"anonymized": "匿名化済み", "refused": "拒否（出力は書き込まれていません）"},
+        "status": {"anonymized": "匿名化済み", "refused": "拒否（出力は書き込まれていません）",
+                   "plan": "計画（推定のみ。探索も書き込みもしません）"},
         "reason": {
             "no_records": "表にレコードがありません",
             "resource_limit_rows": "表のレコード数が設定の上限を超えています",
@@ -87,6 +107,20 @@ _MSG = {
         "diag_limit": "診断: 格子 {nodes} ノード（QIごとの段数 {tops}）、使用した評価 {evals}（上限 {max_evals}）",
         "diag_verification": "診断: 出力に群れ {crowds} 個、k 未満の群れ {bc} 個（{br} 件）、一独りのレコード {alone} 件。",
         "diag_l_shortfall": "  「{col}」: 多様性が l 未満の群れ {c} 個（{r} 件）",
+        "plan_records": "レコード: 入力 {n} 件、列数 {cols}",
+        "plan_lattice": "探索空間: 準識別子 {cols} の格子は {nodes} ノード（最大の高さ {h}）",
+        "plan_budget": "除外の上限: {n} 件中 {b} 件（{pct:.1f}%）",
+        "plan_before": "段階0（そのまま）では、{n} 件中 {a} 件（{p:.0%}）が一独りで、k 未満の群れに属するレコードは {below} 件です。",
+        "plan_sens": "  「{col}」: 異なる値 {v} 種類（l = {l}）",
+        "plan_warnings": "警告:",
+        "plan_no_warnings": "警告: なし",
+        "warn_rows_over_limit": "レコード数 {records} 件が上限 {max_rows} 件を超えています。実行すると resource_limit_rows で拒否されます。",
+        "warn_k_unreachable": "レコードが {records} 件しかないため、k = {k} には届きません。",
+        "warn_l_unreachable": "「{column}」の異なる値は {distinct} 種類しかないため、l = {l} には届きません。",
+        "warn_budget_zero": "除外は 0 件しか許されず、段階0で既に {records} 件が k 未満の群れに属します。一般化だけで満たす必要があります。",
+        "warn_lattice_large": "格子は {nodes} ノードで上限 {cap} を超えるため、改善フェーズは省略され、結果が厳密な最適にならないことがあります。",
+        "warn_evals_tight": "格子は最大 {nodes} ノードに対し max_evals が {max_evals} のため、探索が resource_limit_search で打ち切られる可能性があります。",
+        "warn_many_singletons": "QI 列だけで一独りのレコードが {records} 件（{ratio:.0%}）です。強い一般化が必要になる見込みです。",
     },
 }
 
@@ -120,6 +154,26 @@ class Report:
                         alone=dg["records_alone"]))
                     for col, e in dg.get("l_shortfalls", {}).items():
                         lines.append(m["diag_l_shortfall"].format(col=col, c=e["crowds"], r=e["records"]))
+            return "\n".join(lines)
+        if d["status"] == "plan":
+            p, b = d["lattice"], d["budget"]
+            lines.append(m["plan_records"].format(n=d["input"]["records"], cols=d["input"]["columns"]))
+            lines.append(m["plan_lattice"].format(nodes=p["nodes"], h=p["max_height"],
+                                                  cols=", ".join(p["quasi_identifiers"])))
+            lines.append(m["plan_budget"].format(b=b["records"], n=d["input"]["records"],
+                                                 pct=100 * b["max_suppression"]))
+            bf = d["before"]
+            lines.append(m["plan_before"].format(a=bf["records_alone"], n=d["input"]["records"],
+                                                 p=bf["records_alone_ratio"], below=bf["records_below_k"]))
+            if d["settings"]["l"] > 1:
+                for col, v in d["sensitive"]["distinct"].items():
+                    lines.append(m["plan_sens"].format(col=col, v=v, l=d["settings"]["l"]))
+            if d["warnings"]:
+                lines.append(m["plan_warnings"])
+                for w in d["warnings"]:
+                    lines.append("  - " + m["warn_" + w["code"]].format(**w["params"]))
+            else:
+                lines.append(m["plan_no_warnings"])
             return "\n".join(lines)
         r = d["result"]
         lines.append(m["records"].format(n_in=d["input"]["records"], n_out=r["records_out"],

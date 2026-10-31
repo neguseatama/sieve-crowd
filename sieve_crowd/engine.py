@@ -15,7 +15,7 @@ from .model import ConfigError, Role
 from .prng import SplitMix64
 from .pseudonym import pseudonym
 from .report import Report, base
-from .search import Infeasible, Searcher, SearchLimitExceeded
+from .search import Infeasible, Searcher, SearchLimitExceeded, REFINE_MAX_NODES
 
 
 @dataclass(frozen=True)
@@ -248,6 +248,66 @@ def anonymize(header: Sequence[str], rows: Sequence[Sequence[str]], cfg: Config,
 
 
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def plan_table(header: Sequence[str], rows: Sequence[Sequence[str]], cfg: Config) -> dict:
+    """Pre-flight profile of a run: the exact search-space size, the suppression budget and the
+    level-0 crowd statistics, with warnings.  No search is run; no cell values are reported."""
+    header = list(header)
+    _check_columns(header, cfg)
+    n = len(rows)
+    pos = {name: i for i, name in enumerate(header)}
+    qi_cols = [h for h in header if cfg.columns[h].role is Role.QI]
+    sens_cols = [h for h in header if cfg.columns[h].role is Role.SENSITIVE]
+
+    tops = [make_generalizer(cfg.columns[c].gen or {}).levels for c in qi_cols]
+    nodes = math.prod(t + 1 for t in tops) if tops else 1
+    budget = max(0, min(n - 1, int(math.floor(cfg.max_suppression * n))))
+
+    before = measure(header, rows, qi_cols, [])
+    diag = diagnose(header, rows, qi_cols, sens_cols, cfg.k, cfg.l)
+    sens_distinct = {c: len({_norm(r[pos[c]]) for r in rows}) for c in sens_cols}
+
+    warnings: list[dict] = []
+
+    def warn(code: str, **params) -> None:
+        warnings.append({"code": code, "params": params})
+
+    if n > cfg.max_rows:
+        warn("rows_over_limit", records=n, max_rows=cfg.max_rows)
+    if n < cfg.k:
+        warn("k_unreachable", records=n, k=cfg.k)
+    for c, v in sens_distinct.items():
+        if v < cfg.l:
+            warn("l_unreachable", column=c, distinct=v, l=cfg.l)
+    if budget == 0 and diag["records_below_k"] > 0:
+        warn("budget_zero", records=diag["records_below_k"])
+    if nodes > REFINE_MAX_NODES:
+        warn("lattice_large", nodes=nodes, cap=REFINE_MAX_NODES)
+    if nodes > cfg.max_evals:
+        warn("evals_tight", nodes=nodes, max_evals=cfg.max_evals)
+    if n and before["records_in_crowd_of_1"] / n >= 0.5:
+        warn("many_singletons", records=before["records_in_crowd_of_1"],
+             ratio=round(before["records_in_crowd_of_1"] / n, 4))
+
+    d = base("plan")
+    d["input"] = {"records": n, "columns": len(header)}
+    d["settings"] = {"k": cfg.k, "l": cfg.l, "max_suppression": cfg.max_suppression,
+                     "max_rows": cfg.max_rows, "max_evals": cfg.max_evals}
+    d["columns"] = inspect_table(header, rows)
+    d["lattice"] = {"quasi_identifiers": qi_cols, "tops": tops, "max_height": sum(tops),
+                    "nodes": nodes, "refinement_cap": REFINE_MAX_NODES,
+                    "refinement_skipped": nodes > REFINE_MAX_NODES,
+                    "worst_case_evaluations": nodes}
+    d["budget"] = {"records": budget, "max_suppression": cfg.max_suppression}
+    d["before"] = {"crowds": before["crowds"], "smallest_crowd": before["k"],
+                   "records_alone": before["records_in_crowd_of_1"],
+                   "records_alone_ratio": (before["records_in_crowd_of_1"] / n) if n else 0.0,
+                   "max_risk": before["max_risk"], "average_risk": before["average_risk"],
+                   "records_below_k": diag["records_below_k"]}
+    d["sensitive"] = {"columns": sens_cols, "distinct": sens_distinct}
+    d["warnings"] = warnings
+    return d
 
 
 def inspect_table(header: Sequence[str], rows: Sequence[Sequence[str]]) -> list[dict]:
