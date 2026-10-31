@@ -1,6 +1,6 @@
 # Sieve Crowd — Specification
 
-Version 0.2.0. [日本語版](SPEC.ja.md)
+Version 0.3.0. [日本語版](SPEC.ja.md)
 
 Sieve Crowd turns a table about people (CSV, JSON or XML) into a table in which every record belongs to a **crowd**
 of at least *k* records that look alike on the columns an outsider could already know, and **measures the result on
@@ -46,7 +46,7 @@ enforces or tests it.
 
 | `type` | Parameters | Levels |
 |---|---|---|
-| `numeric` | `widths`: positive integers, each a **multiple** of the previous (default `[5,10,20,50,100]`) | 0 value · j: range of width `widths[j-1]` (`30-34`; decimals `[30,35)`) · top `*`. Empty or unparseable values become `*` from level 1. |
+| `numeric` | `widths`: positive integers, each a **multiple** of the previous (default `[5,10,20,50,100]`) — **or** `bins`: strictly increasing interior edges whose first and last bins are open-ended (`widths` and `bins` are mutually exclusive) | 0 value · `widths`: j: range of width `widths[j-1]` (`30-34`; decimals `[30,35)`) · `bins`: 1 the custom bins (integers `<0`, `0-19`, `65+`; decimals `<0.5`, `[0.5,20)`, `>=65`) · top `*`. Empty or unparseable values become `*` from level 1; fractional `bins` edges on an integer column are rejected. |
 | `date` | – | 0 `YYYY-MM-DD` · 1 `YYYY-MM` · 2 `YYYY` · 3 decade `1990s` · 4 `*`. Invalid dates become `*` from level 1. |
 | `prefix` | `length` n ≥ 1 | 0 value · j (1..n): last j characters replaced by `*` · n+1 `*` |
 | `category` | `hierarchy`: value → [parent, grandparent, …] | 0 value · 1..depth ancestors (shorter chains repeat their last ancestor) · top `*`. Values missing from the hierarchy become `*` from level 1. An inconsistent hierarchy (a group with two parents) or an ancestor named `*` is rejected. |
@@ -100,6 +100,18 @@ Settings may be overridden on the command line (`--k`, `--l`, `--max-suppression
 | `inspect FILE [--config-out F] [--in-format F] [--lang]` | per column: distinct values, empties, share of unique values, apparent shape, and a *hint* (from the column name and the values, e.g. "looks like a direct identifier"); writes a template with role `?` and the hint as a `_hint` comment. Roles are never assigned automatically |
 | `keygen -o F` | writes a random key (file mode 600); never replaces an existing file without `--force` |
 | `run FILE -c CONFIG (-o OUT \| --dry-run)` | anonymize; options `--key-file --k --l --max-suppression --keep-order --shuffle-seed --lang --delimiter --in-format --out-format --max-rows --max-evals --report-json --quiet --force` |
+| `plan FILE -c CONFIG` | pre-flight profile of the run, before any search: options `--k --l --max-suppression --max-rows --max-evals --key-file --lang --delimiter --in-format --report-json --quiet` |
+
+The plan is a receipt of its own (`status = "plan"`). It reports only **exact** numbers: the lattice
+size and maximum height follow from the configuration alone (each QI contributes `levels + 1` nodes),
+the suppression budget is `min(n − 1, ⌊max_suppression × n⌋)`, the per-column observations and the
+level-0 crowd statistics (crowds, singletons, records in crowds smaller than k) come from one pass
+over the table, and every `sensitive` column's distinct-value count decides l-reachability. It never
+estimates: nothing about the search itself is predicted. Warnings (codes with parameters):
+`rows_over_limit`, `k_unreachable`, `l_unreachable`, `budget_zero` (no suppression allowed while
+records already sit in too-small crowds at level 0), `lattice_large` (above the refinement cap, so
+phase 2 is skipped), `evals_tight` (lattice larger than `max_evals`) and `many_singletons` (≥ 50% of
+records alone at level 0 — a heuristic). The plan performs no search, writes no table, and exits 0.
 
 The output is never the input file and an existing output needs `--force`; files are written atomically. Exit codes:
 0 ok · 1 I/O · 2 configuration/usage/invalid input · 3 refused. Input is UTF-8 (a BOM is accepted); the output is
@@ -140,6 +152,15 @@ maximum height, precision loss), per-column disposition (for QIs: level and a de
 share of unique values), row order, `relaxations`, search statistics and `verification`. **Cell values never appear
 in the receipt**, only column names and aggregates.
 
+When suppression removed records, the receipt also carries `diagnostics.suppression`: the budget, the number of
+dropped crowds and records, a crowd-size histogram (capped at 20 entries), the split of dropped crowds into
+*smaller than k* vs *short of l-diversity* (per sensitive column), and `one_level_further` — per QI that is not yet
+at its top level, how many dropped records one coarsening step would rescue. Refused runs carry reason-specific
+`diagnostics`: `infeasible` (records vs k; per sensitive column distinct values vs l), `resource_limit_search`
+(lattice size, levels per QI, evaluations used vs the limit), `verification_failed` (crowd-size histogram of the
+output, per-column l shortfalls, the tested level vector). Diagnostics name columns and report sizes and counts
+only — the labels of individual crowds (which are derived from cell values) are never reported.
+
 ## 10. Invariants checked by the tests
 
 | | |
@@ -150,6 +171,8 @@ in the receipt**, only column names and aggregates.
 | — | Every hierarchy coarsens (tested on random values for every generalizer). |
 | — | Same table + settings ⇒ same output; SplitMix64 and pseudonym vectors fixed (`tests/vectors`). |
 | — | The receipt contains no cell values. |
+| — | Diagnostics and plans contain aggregates and column names only: never a crowd's QI labels. |
+| — | The plan's lattice size, tops and budget equal the search's own numbers (exact, not estimated). |
 | — | NFC and NFD spellings of a value form one crowd. |
 | — | The same logical table produces the same output whatever format carried it; JSON and XML round-trip. |
 
@@ -160,6 +183,9 @@ in the receipt**, only column names and aggregates.
   is easy to notice.
 * l-diversity is the *distinct* variant. Record suppression removes whole crowds; values are not masked in place.
 * Missing and unparseable values are generalized straight to `*`, so they form crowds of their own at low levels.
+* `numeric` custom `bins` choose their label text from the edges as configured; the column's integer/decimal mode
+  (decided from the data, as for `widths`) only picks between `0-19` / `[0,20)` styles.
+* The plan mode shares the run's configuration validation and reads the table once; it never runs the lattice search.
 * CSV, JSON and XML (UTF-8, header row, one table). Quoted fields and custom delimiters are supported through
   Python's `csv`; the JSON and XML adapters normalize to the same string table, so the engine is format-blind.
 * Indicative speed: 100,000 rows × 4 QIs in about 6 s on a laptop-class CPU.
@@ -180,6 +206,9 @@ in the receipt**, only column names and aggregates.
 | — | Limits: 200,000 rows, 20,000 evaluations | bounded time |
 | — | Receipt has aggregates and column names only | the receipt can be shared |
 | — | `inspect` gives hints, never roles; the receipt shows the situation before and after | explain the value in terms the reader cares about, without guessing for them |
+| — | Custom `bins` for numeric columns (interior edges, open ends) | legal and practical classifications are non-uniform; the multiple-of rule stays for `widths` |
+| — | Diagnostics are aggregate-only (sizes, counts, levels — never crowd labels) | tuning must not cost confidentiality; the receipt stays shareable |
+| — | `plan` reports only exact numbers and performs no search | an estimate would erode the measured-guarantee stance; the exact lattice size is already decidable from the configuration |
 | — | Formats by extension with explicit `--in-format` / `--out-format`; no Excel support | predictable files, unambiguous exceptions, and no third-party readers |
 | — | JSON as records or `{"header", "rows"}`; cells normalize to strings at the door | the engine stays format-blind; strict rejection keeps tables unambiguous |
 | — | XML fields carry a `name` attribute; DOCTYPE and namespaces are rejected outright | column names are arbitrary strings (element names are not), and a privacy tool must not parse entity-expanding input |

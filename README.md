@@ -1,4 +1,4 @@
-# Sieve Crowd v0.2.0
+# Sieve Crowd v0.3.0
 
 English | [日本語](README.ja.md)
 
@@ -57,6 +57,12 @@ Sieve is a family of engines that share three design principles — deterministi
   Implemented with the Python standard library only. Data never leaves your computer (no account, offline, no upload).
 - **Minimal generalization and suppression**
   Data is not rounded more than necessary; resolution is preserved as much as possible while grouping. Records that still cannot form a group are safely removed (suppressed) rather than distorted.
+- **Pre-flight plan**
+  `sieve-crowd plan` reports, before any search, the exact search-space size (lattice nodes), the suppression budget, the level-0 risk profile and warnings (unreachable k/l, tight limits, many isolated records) — so tuning happens before the run, not after.
+- **Diagnostics in the receipt**
+  When records are suppressed, the receipt explains why — crowd sizes, "smaller than k" vs "short of diversity", and a per-column hint of which quasi-identifier one more generalization step would rescue. In aggregates only; never a cell value.
+- **Custom bins for numeric columns**
+  Non-uniform classifications such as `0-19, 20-39, 40-64, 65+` (legal age brackets, income bands) can be given directly as bin edges.
 - **Receipt for the record**
   A machine-readable receipt records what was done (rules applied, suppression count, measurements). The receipt contains no personal information.
 - **Supported formats**
@@ -104,10 +110,18 @@ sieve-crowd inspect people.csv --config-out config.json
 
 Edit the generated `config.json` to define the role of each column.
 
-### 3. Run anonymization
+### 3. Preview the plan (optional)
+
+Before running, check the size of the search, the suppression budget and the level-0 risk profile — no search is performed, nothing is written:
 
 ```bash
-sieve-crowd run people.csv -c config.json -o people_safe.csv --receipt receipt.json
+sieve-crowd plan people.csv -c config.json
+```
+
+### 4. Run anonymization
+
+```bash
+sieve-crowd run people.csv -c config.json -o people_safe.csv --report-json receipt.json
 ```
 
 Input and output example:
@@ -130,10 +144,12 @@ Yamamoto Aoi,1971-10-04,55,1510061,M,flu        55-59,15100**,M,asthma
 | `l` | optional | Every crowd must hold at least l distinct sensitive values, preventing "everyone has the same diagnosis". |
 | `max_suppression` | 0.05 (5%) | The maximum fraction of records that may be removed (suppressed) instead of lowering the resolution of the whole table. |
 | Role (`role`) | — | `id` (drop or pseudonymize) · `qi` (generalize) · `sensitive` (keep) · `keep` (keep) · `drop` (remove) |
+| Generalizer (`type`) | — | For `qi` columns: `numeric` (`widths`, or custom non-uniform `bins`), `date`, `prefix`, `category` (hierarchy), `exact` |
 
 Main command-line options:
 
 - `--dry-run`: do not write data; only measure anonymization and assess risk
+- `sieve-crowd plan people.csv -c config.json`: pre-flight estimate of the search space, budget and warnings (no search, no output)
 - `--lang ja`: issue a Japanese receipt (default is English; JSON output is also available)
 - `--in-format` / `--out-format`: explicitly set the input/output format (csv, json, xml)
 - `sieve-crowd keygen -o key.txt`: generate a cryptographic key for pseudonymization
