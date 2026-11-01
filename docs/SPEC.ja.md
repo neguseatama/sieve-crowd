@@ -105,7 +105,7 @@ Sieve Crowdは、人に関する表（CSV・JSON・XML）を、部外者がす�
 | `inspect FILE [--config-out F] [--in-format F] [--lang]` | 列ごとの異なる値の数、空の数、値が一意な割合、見かけの形と、列名と値に基づく*ヒント*（例：「直接識別子のようです」）を表示し、役割 `?` と `_hint` コメントを含むひな形を書く。役割は自動では割り当てない |
 | `keygen -o F` | ランダムな鍵を書く（ファイルモード600）。`--force` なしに既存のファイルを置き換えない |
 | `run FILE -c CONFIG (-o OUT \| --dry-run)` | 匿名化。オプション：`--key-file --k --l --max-suppression --missing-value-policy --keep-order --shuffle-seed --lang --delimiter --in-format --out-format --max-rows --max-evals --report-json --quiet --force` |
-| `plan FILE -c CONFIG` | 実行前の事前プロファイル。探索の前に：オプション `--k --l --max-suppression --missing-value-policy --max-rows --max-evals --key-file --lang --delimiter --in-format --report-json --quiet` |
+| `plan FILE -c CONFIG` | 実行前の事前プロファイル。探索の前に：オプション `--k --l --max-suppression --missing-value-policy --max-rows --max-evals --key-file --lang --delimiter --in-format --report-json --quiet --hint-pack --no-builtin-hints --no-derived --findings-json` |
 
 plan はそれ自身がレシートです（`status = "plan"`）。報告するのは**正確な値だけ**です。格子の大きさと最大の高さは設定だけから決まり
 （各QIは `levels + 1` 個の節を生む）、除外の上限は `min(n − 1, ⌊max_suppression × n⌋)`、列ごとの観察と段階0の群れの統計
@@ -114,7 +114,7 @@ plan はそれ自身がレシートです（`status = "plan"`）。報告する�
 `l_unreachable`、`budget_zero`（除外が許されないのに段階0で既に小さすぎる群れがある）、`missing_over_budget`（`suppress` 方針で、
 準識別子が空のレコードが予算を超える）、`lattice_large`（改善フェーズの上限を超えるため
 第2段階が省略される）、`evals_tight`（格子が `max_evals` を超える）、`many_singletons`（段階0で一独りが 50% 以上 — 発見的手法）。
-現在の方針の下で準識別子が空のレコード数も報告します。
+現在の方針の下で準識別子が空のレコード数も報告します。v0.6.0 からは keep 列 × 準識別子の導出分析（§12）も実行します（`--no-derived` で省略）。
 plan は探索を実行せず、表を書かず、終了コード 0 で終わります。
 
 出力先が入力ファイルになることはなく、既存の出力ファイルには `--force` が必要で、書き込みは原子的に行われます。終了コード：
@@ -201,7 +201,11 @@ JSON／XML に対して指定すると拒否されます。
 
 **漏洩検査（v0.5.1）。** `leak: true` のルールは、検査対象の列をトークン単位で走査します。セルを空白と句読点で区切る（`-` `+` `@` `.` `_` `%` は区切らない）ので、文章の途中に混ざった番号も見つかります。ハイフン付きトークンはハイフンを除いた形でも照合します（`03-1234-5678` → `0312345678`）。空白で区切られた断片は決して結合しません（`03 1234 5678` は検出されない・文書化した制約）。トークンは ASCII 英数字と区切らない記号の連続なので、全角の数字やハイフン（`０９０－１２３４－５６７８` など）はトークンにならず、このままでは検出されません（同種の文書化した制約）。4096 文字を超えるセルは検査せず `skipped` として数えます。`plan` では宣言された役割が `keep`・`sensitive`・`qi` の列だけを検査し（id/drop は決して検査しません）、`inspect` は役割がないので全列を記録します。件数は `columns.<列>.leaks[]` に `{pack, rule, count, checked, skipped}` で入ります（`checked` は実際に走査した空でないセル数・件数または skipped が正のとき要素が出ます）。`plan` では列に `declared_role` が付き、件数 1 以上で stderr の警告行と `warnings` の `code: "leak"` 要素（列名・宣言役割・パック・ルール・件数・checked）が出ます。`inspect` は代わりに候補と同じ書式の 1 行を出します。数字は「可能性」であって証明ではなく、警告は終了コードを変えません。
 
-所見は集計値と列名のみで、**セルの値は一切出ません**。`findings.packs` は従来どおりパック id の配列（読み手は不変）。新しいトップレベルの `pack_info` が読み込み順に `{id, version, source, sha256}` を並べます（`sha256` は読み込んだバイト列そのもの・組み込みは文字列定数の UTF-8 バイト列のハッシュ・`version` がないパックは `null`）。`inspect` と `plan` は先頭に読み込んだパックを示す 1 行を出します（plan の `--quiet` では出ず、パックなしでは出ません）。走査時の警告は 4 つです: `role_mismatch`（`qi` を提案された列が name+value/value 証拠で `keep`/`sensitive` 宣言されている）、`mixed_form`（全角・半角の混在・NFC は折りたたまないため別の群れになる）、`japanese_era`（和暦形式の値）、そして plan のみ `leak`（上記）。組み込み `jp-basic` パック（version 1.0.0）は郵便番号（`prefix` length 4）、電話/マイナンバー/メール/カードの漏洩検査、47 都道府県の `category` 階層（パック内に地方区分の基準を 1 つ固定: 三重 = 近畿・新潟 = 中部）、年齢をカバーします。
+**keep 列 × 準識別子の導出関係（v0.6.0、plan のみ）。** パックとは独立に、`plan` は keep 列 X と準識別子 Q の全ての組（X ≠ Q・表の列順）をクロスし、両方が空でない行（値の比較はエンジンの `_norm`: NFC＋前後の空白除去）の 1 回のクロス集計から双方向を評価します。`reveals_qi` ＝ keep 列が生の準識別子の値をほぼ決める（X はそのまま出るので Q を一般化しても隠せない）。`implied_by_qi` ＝ 準識別子の値が keep 列の値をほぼ決める。方向ごとに、s ＝ 比較レコード数、m ＝ ソースの異なる値の数、v ＝ ソースの値では 1 つの値に定まらないレコード数（s − 各グループの最大 target 計数の和）として、s < 50 なら `unchecked`、どちらかの列が一定か s − m = 0（ソースが一意・単なる一意性で関係ではない）なら `trivial`、s ≥ 50 かつ s − m > 0 かつ 100·v ≤ s かつ 10·v ≤ s − m なら `flagged`、それ以外は `clear`。閾値（50・1%・10%）と `PAIR_LIMIT = 400` はコード内定数で、上限を超えた組は `skipped_pairs` に数えて打ち切ります。flagged は stderr の `  - derived: …` 行（ヒントパックの所見の直後・自分の見出しなし・`--quiet` で抑制）と `warnings` 要素 `{code: "derived", column, declared_role, qi_column, relation, support, violations}` になり、findings のトップレベルには `derived_summary = {pairs, skipped_pairs, unchecked, trivial, flagged, clear}` が加わり、不変条件 `unchecked + trivial + flagged + clear = 2 × (pairs − skipped_pairs)` が常に成り立ちます。分析はパックの有無に関係なく動き（パックなしの状態では findings JSON は `packs: []` / `pack_info: []` ＋ 導出結果）、`--no-derived` で導出の痕跡が全て消えます。列名と件数のみで、セルの値は一切出ません。
+
+所見は集計値と列名のみで、**セルの値は一切出ません**。`findings.packs` は従来どおりパック id の配列（読み手は不変）。トップレベルの `pack_info` が読み込み順に `{id, version, source, sha256}` を並べます（`sha256` は読み込んだバイト列そのもの・組み込みは文字列定数の UTF-8 バイト列のハッシュ・`version` がないパックは `null`）。`inspect` と `plan` は先頭に読み込んだパックを示す 1 行を出します（plan の `--quiet` では出ず、パックなしでは出ません）。走査時の警告は 4 つです: `role_mismatch`（`qi` を提案された列が name+value/value 証拠で `keep`/`sensitive` 宣言されている）、`mixed_form`（全角・半角の混在・NFC は折りたたまないため別の群れになる）、`japanese_era`（和暦形式の値）、そして plan のみ `leak`（上記）。組み込み `jp-basic` パック（version 1.1.0）は郵便番号（`prefix` length 4）、生年月日（`#{4}-#{2}-#{2}` → `qi` と `type: date` を提案・v0.6.0）、電話/マイナンバー/メール/カードの漏洩検査、47 都道府県の `category` 階層（パック内に地方区分の基準を 1 つ固定: 三重 = 近畿・新潟 = 中部）、年齢をカバーします。
+
+**`packs/` ディレクトリ（v0.6.0）。** wheel とは別に配布するパックは `packs/` に置きます。`packs/` も `tools/` もパッケージには含まれません（wheel は `sieve_crowd` パッケージのみ）。`jp-municipality-2026` パックは総務省の全国地方公共団体コード（入力列 団体コード / 都道府県名 / 市区町村名）から `tools/make_municipality_pack.py` でローカル生成します: 標準ライブラリのみ・同じ入力ならバイト同一の決定論的な出力（値リストは昇順・キー順固定・2 スペース）、全く同じ行の重複は統合し、契約違反（列名の不一致・6 桁でないコード・内容の異なる重複）は列名と行番号だけ示して終了コード 2（セルの値は出ません）。生成されるのは 3 ルール（`jp-municipality-code` 6 桁 → prefix 5 を提案・`jp-municipality-code5` 5 桁 → prefix 2 を提案・`jp-municipality-name` → category を提案）で、組み込みと共存でき（id の衝突なし）`parse_config` を通ります。パック本体は出典の利用条件確認まで配布しません（packs/README.md）。
 
 ## 付録　独自に決めたこと
 
