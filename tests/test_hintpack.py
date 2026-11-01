@@ -351,6 +351,8 @@ class T12FindingsNoCellValues(unittest.TestCase):
 
 
 class T13NoBuiltinAndDuplicates(unittest.TestCase):
+    # NOTE (v0.5.1): load order is builtin first, then the command-line order,
+    # so test_multiple_packs_compose expects ["jp-basic", "extra"] (was the reverse).
     def test_no_builtin_hints_excludes_jp_basic(self):
         # A user pack alone, with --no-builtin-hints: jp-basic is absent.
         csv = b"zip\n1500001\n"
@@ -392,7 +394,86 @@ class T13NoBuiltinAndDuplicates(unittest.TestCase):
             fj = _write(d, "f.json", b"")
             call("plan", src, "-c", cfg, "--hint-pack", p1, "--findings-json", fj, "--quiet")
             f = json.load(open(fj))
-            self.assertEqual(f["packs"], ["extra", "jp-basic"])
+            # v0.5.1 load order: builtin first, then the command-line order (T18 pins pack_info likewise)
+            self.assertEqual(f["packs"], ["jp-basic", "extra"])
+
+
+class T17DuplicateIdsRefused(unittest.TestCase):
+    """C (v0.5.1): no silent override of ids.  Pack ids and rule ids are unique
+    across the whole set, builtin included; --no-builtin-hints is the way to
+    replace the builtin.  Messages name files and ids, never cell values."""
+
+    CSV = b"zip\n1500001\n"
+    CFG = json.dumps({"k": 2, "columns": {"zip": {"role": "qi", "type": "prefix", "length": 4}}}).encode()
+
+    def test_pack_id_clash_with_builtin_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            cfg = _write(d, "c.json", self.CFG)
+            pack = _write(d, "mypack.json", json.dumps(
+                {"schema": 1, "id": "jp-basic", "rules": [
+                    {"id": "mine", "when": {"column_names": ["zip"]},
+                     "suggest": {"role": "id"}}]}).encode())
+            rc, _, err = call("plan", src, "-c", cfg, "--hint-pack", pack, "--quiet")
+            self.assertEqual(rc, 2)                     # ConfigError -> EXIT_CONFIG
+            self.assertIn('pack id "jp-basic" is already used by the built-in pack', err)
+            self.assertIn("--no-builtin-hints", err)
+            self.assertIn("mypack.json", err)
+            self.assertNotIn("1500001", err)            # no cell value in the message
+
+    def test_no_builtin_hints_allows_reusing_jp_basic(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            cfg = _write(d, "c.json", self.CFG)
+            pack = _write(d, "mypack.json", json.dumps(
+                {"schema": 1, "id": "jp-basic", "rules": [
+                    {"id": "mine", "when": {"column_names": ["zip"]},
+                     "suggest": {"role": "id"}}]}).encode())
+            fj = _write(d, "f.json", b"")
+            rc, _, err = call("plan", src, "-c", cfg, "--hint-pack", pack, "--no-builtin-hints",
+                              "--findings-json", fj, "--quiet")
+            self.assertEqual(rc, 0, err)
+            f = json.load(open(fj))
+            self.assertEqual(f["packs"], ["jp-basic"])   # the user copy, builtin absent
+
+    def test_rule_id_clash_with_builtin_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            cfg = _write(d, "c.json", self.CFG)
+            pack = _write(d, "mypack.json", json.dumps(
+                {"schema": 1, "id": "mine", "rules": [
+                    {"id": "jp-phone", "when": {"column_names": ["zip"]}}]}).encode())
+            rc, _, err = call("plan", src, "-c", cfg, "--hint-pack", pack, "--quiet")
+            self.assertEqual(rc, 2)
+            self.assertIn('rule id "jp-phone" is already used by the built-in pack', err)
+            self.assertIn("--no-builtin-hints", err)
+
+    def test_rule_id_clash_between_user_packs_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            cfg = _write(d, "c.json", self.CFG)
+            p1 = _write(d, "a.json", json.dumps(
+                {"schema": 1, "id": "a", "rules": [
+                    {"id": "shared", "when": {"column_names": ["zip"]}}]}).encode())
+            p2 = _write(d, "b.json", json.dumps(
+                {"schema": 1, "id": "b", "rules": [
+                    {"id": "shared", "when": {"column_names": ["zip"]}}]}).encode())
+            rc, _, err = call("plan", src, "-c", cfg, "--hint-pack", p1, "--hint-pack", p2, "--quiet")
+            self.assertEqual(rc, 2)
+            self.assertIn('rule id "shared" is already used by pack "a"', err)
+
+    def test_pack_id_clash_between_user_packs_names_the_first_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            p1 = _write(d, "a.json", json.dumps(
+                {"schema": 1, "id": "dup", "rules": [
+                    {"id": "r", "when": {"column_names": ["x"]}}]}).encode())
+            p2 = _write(d, "b.json", json.dumps(
+                {"schema": 1, "id": "dup", "rules": [
+                    {"id": "r2", "when": {"column_names": ["y"]}}]}).encode())
+            with self.assertRaises(ConfigError) as cm:
+                load_packs([p1, p2], include_builtin=False)
+            self.assertIn('pack id "dup" is already used by pack "dup"', str(cm.exception))
+            self.assertIn("b.json", str(cm.exception))   # names the duplicate file (full path)
 
 
 if __name__ == "__main__":

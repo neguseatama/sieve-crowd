@@ -272,14 +272,24 @@ def load_pack_bytes(data: bytes, *, source: str = "<pack>") -> Pack:
 
 
 def load_packs(paths: Sequence[str], *, include_builtin: bool) -> list[Pack]:
-    """Load user packs then the builtin (unless ``--no-builtin-hints``).
+    """Load the builtin pack (unless ``--no-builtin-hints``), then the user
+    packs in the command-line order — the order findings ``packs``/``pack_info``
+    and candidate lists use (ties broken in favour of the earlier pack).
 
-    Duplicate pack ids across the whole set are refused.  Order is user packs
-    first, then the builtin, so a user pack's rules appear before the builtin's
-    in candidate lists (ties broken in favour of the earlier pack).
+    Pack ids and rule ids are unique across the whole set, builtin included:
+    a duplicate raises ConfigError (exit code 2).  To replace the builtin,
+    give ``--no-builtin-hints`` and then reuse its id.
     """
     packs: list[Pack] = []
-    ids: set[str] = set()
+    pack_owner: dict[str, str] = {}   # pack id -> what claimed it first
+    rule_owner: dict[str, str] = {}   # rule id -> pack id that claimed it first
+    if include_builtin:
+        from .hintpack_builtin import BUILTIN_PACK_BYTES
+        pack = load_pack_bytes(BUILTIN_PACK_BYTES, source="<jp-basic>")
+        packs.append(pack)
+        pack_owner[pack.id] = "the built-in pack"
+        for r in pack.rules:
+            rule_owner[r.id] = "the built-in pack"
     for p in paths:
         try:
             with open(p, "rb") as fh:
@@ -287,17 +297,24 @@ def load_packs(paths: Sequence[str], *, include_builtin: bool) -> list[Pack]:
         except OSError as exc:
             raise ConfigError(f"hint pack {p}: cannot read ({exc.strerror})") from None
         pack = load_pack_bytes(data, source=p)
-        if pack.id in ids:
-            raise ConfigError(f"hint pack: duplicate id {pack.id!r} (in {p})")
-        ids.add(pack.id)
+        if pack.id in pack_owner:
+            if pack_owner[pack.id] == "the built-in pack":
+                raise ConfigError(
+                    f'hint pack "{p}": pack id "{pack.id}" is already used by the built-in pack '
+                    f"(use --no-builtin-hints to replace it)")
+            raise ConfigError(
+                f'hint pack "{p}": pack id "{pack.id}" is already used by pack "{pack_owner[pack.id]}"')
+        for r in pack.rules:
+            if r.id in rule_owner:
+                if rule_owner[r.id] == "the built-in pack":
+                    raise ConfigError(
+                        f'hint pack "{p}": rule id "{r.id}" is already used by the built-in pack '
+                        f"(use --no-builtin-hints to replace it)")
+                raise ConfigError(
+                    f'hint pack "{p}": rule id "{r.id}" is already used by pack "{rule_owner[r.id]}"')
+            rule_owner[r.id] = pack.id
+        pack_owner[pack.id] = pack.id
         packs.append(pack)
-    if include_builtin:
-        from .hintpack_builtin import BUILTIN_PACK_BYTES
-        pack = load_pack_bytes(BUILTIN_PACK_BYTES, source="<jp-basic>")
-        if pack.id not in ids:
-            packs.append(pack)
-        # a user pack may legitimately override the builtin by reusing its id;
-        # in that case the user copy stands and the builtin is skipped.
     return packs
 
 
