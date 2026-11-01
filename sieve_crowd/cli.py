@@ -7,7 +7,7 @@ import os
 import secrets
 import sys
 import tempfile
-from typing import Optional, Sequence
+from typing import Mapping, Optional, Sequence
 
 from . import __version__
 from .config import parse_config, parse_key
@@ -51,6 +51,12 @@ def _parser() -> argparse.ArgumentParser:
     i.add_argument("--lang", choices=["en", "ja"], default="en")
     i.add_argument("--config-out", metavar="FILE", help="write a template with role '?' for every column")
     i.add_argument("--force", action="store_true")
+    i.add_argument("--hint-pack", metavar="FILE", action="append",
+                   help="load a hint pack (inspect/plan only; may be given more than once)")
+    i.add_argument("--no-builtin-hints", action="store_true",
+                   help="exclude the built-in jp-basic pack when --hint-pack is given")
+    i.add_argument("--findings-json", metavar="FILE",
+                   help="write the hint-pack findings (aggregates only, never cell values) as JSON")
 
     k = sub.add_parser("keygen", help="create a key for pseudonyms")
     k.add_argument("-o", "--output", required=True)
@@ -99,6 +105,12 @@ def _parser() -> argparse.ArgumentParser:
     pl.add_argument("--key-file")
     pl.add_argument("--report-json", metavar="FILE")
     pl.add_argument("--quiet", action="store_true")
+    pl.add_argument("--hint-pack", metavar="FILE", action="append",
+                    help="load a hint pack (inspect/plan only; may be given more than once)")
+    pl.add_argument("--no-builtin-hints", action="store_true",
+                    help="exclude the built-in jp-basic pack when --hint-pack is given")
+    pl.add_argument("--findings-json", metavar="FILE",
+                    help="write the hint-pack findings (aggregates only, never cell values) as JSON")
     return p
 
 
@@ -134,8 +146,15 @@ def _cmd_inspect(a: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
     except OSError as exc:
         print(f"error: cannot read the input ({exc.strerror})", file=sys.stderr); return EXIT_IO
+    packs = _hint_packs(a)
+    if isinstance(packs, int):
+        return packs
     info = inspect_table(header, rows)
     en = a.lang == "en"
+    findings = None
+    if packs:
+        from .hintpack import scan as _scan
+        findings = _scan(header, rows, info, packs, cfg_roles=None)
     print(f"records: {len(rows)}" if en else f"レコード数: {len(rows)}")
     hints = {}
     for c in info:
@@ -146,14 +165,36 @@ def _cmd_inspect(a: argparse.Namespace) -> int:
         print(shown)
         if role:
             print(f"      -> {hints[c['name']][1]}")
+        if findings and c["name"] in findings.template_extras:
+            for cand in findings.template_extras[c["name"]]["_candidates"]:
+                summ = _suggest_summary(cand["suggest"])
+                if en:
+                    print(f"      * hint-pack {cand['pack']}/{cand['rule']}: suggests {summ} (evidence: {cand['evidence']})")
+                else:
+                    print(f"      * ヒントパック {cand['pack']}/{cand['rule']}: {summ} を提案（根拠: {cand['evidence']}）")
+    if findings:
+        for line in findings.warning_lines(a.lang):
+            print(line, file=sys.stderr)
     if a.config_out:
         if os.path.exists(a.config_out) and not a.force:
             print("error: the config file exists (use --force)", file=sys.stderr); return EXIT_IO
-        template = {"k": 5, "l": 1, "max_suppression": 0.05,
-                    "columns": {c["name"]: ({"role": "?", "_hint": hints[c["name"]][1]} if hints[c["name"]][0]
-                                    else {"role": "?"}) for c in info}}
+        extras = findings.template_extras if findings else {}
+        columns = {}
+        for c in info:
+            nm = c["name"]
+            col = {"role": "?", "_hint": hints[nm][1]} if hints[nm][0] else {"role": "?"}
+            if nm in extras:
+                col["_suggest"] = extras[nm]["_suggest"]
+                col["_candidates"] = extras[nm]["_candidates"]
+            columns[nm] = col
+        template = {"k": 5, "l": 1, "max_suppression": 0.05, "columns": columns}
         try:
             _atomic_write(a.config_out, (json.dumps(template, ensure_ascii=False, indent=2) + "\n").encode())
+        except OSError as exc:
+            print(f"error: cannot write ({exc.strerror})", file=sys.stderr); return EXIT_IO
+    if findings and a.findings_json:
+        try:
+            _atomic_write(a.findings_json, (findings.to_json() + "\n").encode("utf-8"))
         except OSError as exc:
             print(f"error: cannot write ({exc.strerror})", file=sys.stderr); return EXIT_IO
     return EXIT_OK
@@ -178,6 +219,38 @@ def _load_config(a: argparse.Namespace):
                         shuffle=not getattr(a, "keep_order", False),
                         shuffle_seed=getattr(a, "shuffle_seed", 0), lang=a.lang,
                         max_rows=a.max_rows, max_evals=a.max_evals, key=key)
+
+
+def _hint_packs(a: argparse.Namespace):
+    """Load hint packs for inspect/plan, or an exit code on failure.
+
+    Returns an empty list when ``--hint-pack`` is not given, so the default
+    inspect/plan output stays byte-identical to v0.4.0 (the feature is opt-in).
+    The import of :mod:`sieve_crowd.hintpack` lives here, not at the top of the
+    module, so ``run`` never pulls it into its import closure.
+    """
+    paths = getattr(a, "hint_pack", None) or []
+    if not paths:
+        return []
+    try:
+        from .hintpack import load_packs
+        return load_packs(paths, include_builtin=not getattr(a, "no_builtin_hints", False))
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+
+def _suggest_summary(s: Mapping) -> str:
+    parts = [f"role={s['role']}"]
+    if "type" in s:
+        parts.append(f"type={s['type']}")
+    if "length" in s:
+        parts.append(f"length={s['length']}")
+    if "widths" in s:
+        parts.append(f"widths={s['widths']}")
+    if "hierarchy" in s:
+        parts.append(f"hierarchy={len(s['hierarchy'])} entries")
+    return ", ".join(parts)
 
 
 def _cmd_run(a: argparse.Namespace) -> int:
@@ -249,12 +322,28 @@ def _cmd_plan(a: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
     except OSError as exc:
         print(f"error: cannot read the input ({exc.strerror})", file=sys.stderr); return EXIT_IO
+    packs = _hint_packs(a)
+    if isinstance(packs, int):
+        return packs
     try:
         report = Report(plan_table(header, rows, cfg))
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    findings = None
+    if packs:
+        from .hintpack import scan as _scan
+        cfg_roles = {n: spec.role.value for n, spec in cfg.columns.items()}
+        findings = _scan(header, rows, report.data["columns"], packs, cfg_roles=cfg_roles)
     if not a.quiet:
         print(report.text(cfg.lang), file=sys.stderr)
+        if findings:
+            for line in findings.warning_lines(cfg.lang):
+                print(line, file=sys.stderr)
+    if findings and a.findings_json:
+        try:
+            _atomic_write(a.findings_json, (findings.to_json() + "\n").encode("utf-8"))
+        except OSError as exc:
+            print(f"error: cannot write ({exc.strerror})", file=sys.stderr); return EXIT_IO
     try:
         if a.report_json:
             _atomic_write(a.report_json, (report.to_json() + "\n").encode("utf-8"))

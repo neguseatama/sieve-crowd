@@ -1,0 +1,487 @@
+"""Hint packs for `inspect` and `plan`: suggest roles and check value shapes.
+
+A pack is a JSON object (schema 1, read as ``utf-8-sig`` so spreadsheet exports
+with a BOM work).  Packs are loaded **only** by ``inspect`` and ``plan``; the
+``run`` command never imports this module (the import sits inside the two
+command handlers, not at the top of ``cli.py``), so the anonymization path is
+byte-for-byte unchanged.
+
+The matching vocabulary is a closed set:
+
+* ``column_names`` — the column's name matches one of these (NFKC + lower-case,
+  i.e. the old ``hint()`` token/substring comparison *with NFKC added*; the old
+  ``hint()`` itself is left untouched).
+* ``value_shape`` — a bounded shape pattern: ``#`` one digit, ``@`` one ASCII
+  letter, ``\\X`` a literal escape of ``X``, any other character is a literal.
+  Only ``{m}`` and ``{m,n}`` quantifiers are allowed, and only on the preceding
+  atom.  No alternation, no nesting, no backreferences — the language cannot
+  describe a catastrophic-backtracking pattern.
+* ``set`` / ``range`` / ``check`` (``luhn`` · ``my_number`` · ``email_shape``)
+  — evaluations that return three values: **match / mismatch / cannot-check**.
+
+Findings carry aggregates and column names only — **no cell value ever appears**
+in a finding, a warning, or a suggestion.  Evidence is reported in the priority
+order: name+value → value → name → stat.
+"""
+from __future__ import annotations
+
+import json
+import re
+import unicodedata
+from dataclasses import dataclass, field
+from typing import Any, Mapping, Optional, Sequence
+
+from .model import ConfigError
+
+SCHEMA = 1
+MAX_PACK_BYTES = 1 << 20      # 1 MiB initial ceiling (declared; raise after measurement)
+MAX_RULES = 200               # initial ceiling
+MAX_NAME_CHARS = 128          # column_names / id length ceiling
+
+_CHECK_KINDS = ("set", "range", "luhn", "my_number", "email_shape")
+_ERA = re.compile(r"(明治|大正|昭和|平成|令和)\d{1,2}年")
+_FULLWIDTH_DIGIT = "".join(chr(c) for c in range(0xFF10, 0xFF1A))      # ０..９
+_FULLWIDTH_UPPER = "".join(chr(c) for c in range(0xFF21, 0xFF3B))      # Ａ..Ｚ
+_FULLWIDTH_LOWER = "".join(chr(c) for c in range(0xFF41, 0xFF5B))      # ａ..ｚ
+_FULL_ALNUM = _FULLWIDTH_DIGIT + _FULLWIDTH_UPPER + _FULLWIDTH_LOWER
+_HALF_DIGIT = "0123456789"
+_HALF_ALPHA = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+# --------------------------------------------------------------------------- #
+# value_shape
+# --------------------------------------------------------------------------- #
+def _compile_shape(shape: str) -> re.Pattern:
+    """Compile a value_shape string into an anchored regex.
+
+    The shape language is restricted on purpose (see module docstring); the
+    compiled regex therefore cannot exhibit exponential backtracking.
+    """
+    atoms: list[str] = []
+    i, n = 0, len(shape)
+    while i < n:
+        ch = shape[i]
+        if ch == "\\":
+            i += 1
+            if i >= n:
+                raise ConfigError("value_shape: '\\' must escape a character")
+            atoms.append(re.escape(shape[i]))
+            kind = "literal"
+        elif ch == "#":
+            atoms.append("[0-9]"); kind = "digit"
+        elif ch == "@":
+            atoms.append("[A-Za-z]"); kind = "letter"
+        elif ch in "{}":
+            raise ConfigError(f"value_shape: '{ch}' must follow an atom")
+        else:
+            atoms.append(re.escape(ch)); kind = "literal"
+        i += 1
+        # quantifier?
+        if i < n and shape[i] == "{":
+            j = shape.find("}", i)
+            if j < 0:
+                raise ConfigError("value_shape: unterminated '{...}'")
+            body = shape[i + 1:j]
+            if not re.fullmatch(r"\d+|\d+,\d+", body):
+                raise ConfigError(f"value_shape: bad quantifier {{{body}}}")
+            lo, _, hi = body.partition(",")
+            hi = hi or lo
+            if int(lo) < 0 or int(hi) < int(lo):
+                raise ConfigError(f"value_shape: bad quantifier {{{body}}}")
+            atoms[-1] = f"(?:{atoms[-1]}){{{body}}}"
+            i = j + 1
+            del kind  # quantifier consumed; not used further
+    return re.compile("".join(atoms) + r"\Z")
+
+
+# --------------------------------------------------------------------------- #
+# checks (three-valued: "match" / "mismatch" / "cannot_check")
+# --------------------------------------------------------------------------- #
+def _luhn(digits: str) -> bool:
+    s = 0
+    for k, d in enumerate(reversed(digits)):
+        x = int(d) * (2 if k % 2 else 1)
+        s += x - 9 if x > 9 else x
+    return s % 10 == 0
+
+
+def _my_number_ok(digits: str) -> bool:
+    """12-digit Japanese My Number: 11 body digits + 1 check digit (residue 11)."""
+    if len(digits) != 12 or not digits.isdigit():
+        return False
+    body, check = digits[:11], int(digits[11])
+    weights = [6, 5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+    total = sum(int(d) * w for d, w in zip(body, weights))
+    r = total % 11
+    expected = 0 if r <= 1 else 11 - r
+    return check == expected
+
+
+_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\Z")
+
+
+def _eval_check(check: "Check", value: str) -> str:
+    kind = check.kind
+    if value == "":
+        return "cannot_check"
+    if kind == "set":
+        return "match" if value in check.values else "mismatch"
+    if kind == "range":
+        try:
+            x = float(value)
+        except ValueError:
+            return "cannot_check"
+        if not (x == x):          # NaN guard (should not arise from float())
+            return "cannot_check"
+        return "match" if check.min <= x <= check.max else "mismatch"
+    if kind == "luhn":
+        return "match" if value.isdigit() and _luhn(value) else (
+            "mismatch" if value.isdigit() else "cannot_check")
+    if kind == "my_number":
+        return "match" if _my_number_ok(value) else (
+            "mismatch" if value.isdigit() and len(value) == 12 else "cannot_check")
+    if kind == "email_shape":
+        return "match" if _EMAIL.match(value) else "mismatch"
+    raise ConfigError(f"unknown check kind: {kind!r}")   # validated earlier; defensive
+
+
+# --------------------------------------------------------------------------- #
+# pack model
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class Check:
+    kind: str
+    values: frozenset[str] = frozenset()
+    min: float = 0.0
+    max: float = 0.0
+
+    @classmethod
+    def from_obj(cls, obj: Mapping[str, Any]) -> "Check":
+        kind = obj.get("kind")
+        if kind not in _CHECK_KINDS:
+            raise ConfigError(f"check: kind must be one of {', '.join(_CHECK_KINDS)}")
+        if kind == "set":
+            vals = obj.get("values")
+            if not isinstance(vals, list) or not vals or not all(isinstance(v, str) for v in vals):
+                raise ConfigError("check set: 'values' must be a non-empty list of strings")
+            return cls(kind, frozenset(vals))
+        if kind == "range":
+            mn, mx = obj.get("min"), obj.get("max")
+            if not isinstance(mn, (int, float)) or isinstance(mn, bool) or \
+               not isinstance(mx, (int, float)) or isinstance(mx, bool):
+                raise ConfigError("check range: 'min' and 'max' must be numbers")
+            if mn > mx:
+                raise ConfigError("check range: 'min' must be <= 'max'")
+            return cls(kind, min=float(mn), max=float(mx))
+        return cls(kind)
+
+
+@dataclass(frozen=True)
+class Rule:
+    id: str
+    pack_id: str
+    column_names: frozenset[str]
+    shape: Optional[re.Pattern]
+    suggest: Optional[Mapping[str, Any]]
+    check: Optional[Check]
+    leak: bool
+
+
+@dataclass(frozen=True)
+class Pack:
+    id: str
+    rules: tuple[Rule, ...]
+
+
+def _norm_name(name: str) -> str:
+    """NFKC + lower-case: the column-name comparison the old hint() used, plus NFKC."""
+    return unicodedata.normalize("NFKC", str(name)).strip().lower()
+
+
+def _validate_rule(obj: Mapping[str, Any], pack_id: str) -> Rule:
+    if not isinstance(obj, Mapping):
+        raise ConfigError(f"pack {pack_id!r}: a rule must be an object")
+    rid = obj.get("id")
+    if not isinstance(rid, str) or not rid or len(rid) > MAX_NAME_CHARS:
+        raise ConfigError(f"pack {pack_id!r}: every rule needs a non-empty string 'id'")
+    when = obj.get("when", {})
+    if not isinstance(when, Mapping):
+        raise ConfigError(f"pack {pack_id!r} rule {rid!r}: 'when' must be an object")
+    names = when.get("column_names")
+    if names is None:
+        names_set = frozenset()
+    elif isinstance(names, list) and all(isinstance(x, str) and x for x in names):
+        names_set = frozenset(_norm_name(x) for x in names)
+    else:
+        raise ConfigError(f"pack {pack_id!r} rule {rid!r}: 'column_names' must be a list of strings")
+    shape_raw = when.get("value_shape")
+    shape = None
+    if shape_raw is not None:
+        if not isinstance(shape_raw, str) or not shape_raw:
+            raise ConfigError(f"pack {pack_id!r} rule {rid!r}: 'value_shape' must be a non-empty string")
+        shape = _compile_shape(shape_raw)
+    if not names_set and shape is None and "check" not in obj and not obj.get("leak"):
+        raise ConfigError(f"pack {pack_id!r} rule {rid!r}: needs 'when', 'check', or 'leak'")
+    suggest = obj.get("suggest")
+    if suggest is not None:
+        if not isinstance(suggest, Mapping) or "role" not in suggest:
+            raise ConfigError(f"pack {pack_id!r} rule {rid!r}: 'suggest' must be an object with a 'role'")
+        if not isinstance(suggest["role"], str):
+            raise ConfigError(f"pack {pack_id!r} rule {rid!r}: suggest.role must be a string")
+    check = None
+    if "check" in obj:
+        check = Check.from_obj(obj["check"])
+    leak = bool(obj.get("leak", False))
+    return Rule(rid, pack_id, names_set, shape, suggest, check, leak)
+
+
+def _parse_pack(raw: Mapping[str, Any]) -> Pack:
+    if raw.get("schema") != SCHEMA:
+        raise ConfigError(f"hint pack: 'schema' must be {SCHEMA}")
+    pid = raw.get("id")
+    if not isinstance(pid, str) or not pid or len(pid) > MAX_NAME_CHARS:
+        raise ConfigError("hint pack: needs a non-empty string 'id'")
+    rules_raw = raw.get("rules")
+    if not isinstance(rules_raw, list) or not rules_raw:
+        raise ConfigError(f"pack {pid!r}: 'rules' must be a non-empty list")
+    if len(rules_raw) > MAX_RULES:
+        raise ConfigError(f"pack {pid!r}: more than {MAX_RULES} rules (ceiling)")
+    seen: set[str] = set()
+    rules = []
+    for r in rules_raw:
+        rule = _validate_rule(r, pid)
+        if rule.id in seen:
+            raise ConfigError(f"pack {pid!r}: duplicate rule id {rule.id!r}")
+        seen.add(rule.id)
+        rules.append(rule)
+    return Pack(pid, tuple(rules))
+
+
+def load_pack_bytes(data: bytes, *, source: str = "<pack>") -> Pack:
+    if len(data) > MAX_PACK_BYTES:
+        raise ConfigError(f"hint pack {source}: larger than {MAX_PACK_BYTES} bytes (ceiling)")
+    try:
+        raw = json.loads(data.decode("utf-8-sig"))
+    except UnicodeDecodeError:
+        raise ConfigError(f"hint pack {source}: not valid UTF-8") from None
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"hint pack {source}: not valid JSON ({exc.msg})") from None
+    if not isinstance(raw, Mapping):
+        raise ConfigError(f"hint pack {source}: the top level must be a JSON object")
+    return _parse_pack(raw)
+
+
+def load_packs(paths: Sequence[str], *, include_builtin: bool) -> list[Pack]:
+    """Load user packs then the builtin (unless ``--no-builtin-hints``).
+
+    Duplicate pack ids across the whole set are refused.  Order is user packs
+    first, then the builtin, so a user pack's rules appear before the builtin's
+    in candidate lists (ties broken in favour of the earlier pack).
+    """
+    packs: list[Pack] = []
+    ids: set[str] = set()
+    for p in paths:
+        try:
+            with open(p, "rb") as fh:
+                data = fh.read()
+        except OSError as exc:
+            raise ConfigError(f"hint pack {p}: cannot read ({exc.strerror})") from None
+        pack = load_pack_bytes(data, source=p)
+        if pack.id in ids:
+            raise ConfigError(f"hint pack: duplicate id {pack.id!r} (in {p})")
+        ids.add(pack.id)
+        packs.append(pack)
+    if include_builtin:
+        from .hintpack_builtin import BUILTIN_PACK_BYTES
+        pack = load_pack_bytes(BUILTIN_PACK_BYTES, source="<jp-basic>")
+        if pack.id not in ids:
+            packs.append(pack)
+        # a user pack may legitimately override the builtin by reusing its id;
+        # in that case the user copy stands and the builtin is skipped.
+    return packs
+
+
+# --------------------------------------------------------------------------- #
+# evaluation
+# --------------------------------------------------------------------------- #
+def _has_fullwidth(v: str) -> bool:
+    return any(c in _FULL_ALNUM for c in v)
+
+
+def _has_halfwidth(v: str) -> bool:
+    return any(c in _HALF_DIGIT + _HALF_ALPHA for c in v)
+
+
+@dataclass
+class ColumnFindings:
+    candidates: list[dict] = field(default_factory=list)
+    checks: list[dict] = field(default_factory=list)
+    leaks: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class Findings:
+    packs: list[str]
+    columns: dict[str, ColumnFindings]
+    warnings: list[dict]
+    template_extras: dict[str, dict]   # col -> {"_suggest": {...}, "_candidates": [...]}
+
+    def to_json(self) -> str:
+        return json.dumps(self._as_obj(), ensure_ascii=False, indent=2, sort_keys=True)
+
+    def _as_obj(self) -> dict:
+        cols: dict[str, dict] = {}
+        for col, cf in self.columns.items():
+            if not cf.candidates and not cf.checks and not cf.leaks:
+                continue
+            entry: dict = {}
+            if cf.candidates:
+                entry["candidates"] = cf.candidates
+            if cf.checks:
+                entry["checks"] = cf.checks
+            if cf.leaks:
+                entry["leaks"] = cf.leaks
+            cols[col] = entry
+        return {"packs": self.packs, "columns": cols, "warnings": self.warnings}
+
+    def warning_lines(self, lang: str) -> list[str]:
+        if not self.warnings:
+            return []
+        ja = lang == "ja"
+        head = "ヒントパックの所見:" if ja else "Hint pack findings:"
+        lines = [head]
+        for w in self.warnings:
+            code = w["code"]
+            if code == "role_mismatch":
+                if ja:
+                    lines.append(
+                        f"  - role_mismatch: 「{w['column']}」は {w['suggested']} を提案しますが、"
+                        f"設定では {w['declared']} として宣言されています（根拠: {w['evidence']}）")
+                else:
+                    lines.append(
+                        f"  - role_mismatch: \"{w['column']}\" suggests {w['suggested']} "
+                        f"but is declared {w['declared']} (evidence: {w['evidence']})")
+            elif code == "mixed_form":
+                if ja:
+                    lines.append(
+                        f"  - mixed_form: 「{w['column']}」に全角・半角が混在する値が "
+                        f"{w['mixed_values']} 件あります（NFC では別の群れになります）")
+                else:
+                    lines.append(
+                        f"  - mixed_form: \"{w['column']}\" has {w['mixed_values']} value(s) "
+                        f"mixing full/half-width forms (NFC keeps them as separate crowds)")
+            elif code == "japanese_era":
+                if ja:
+                    lines.append(
+                        f"  - japanese_era: 「{w['column']}」に和暦形式の値が {w['count']} 件あります"
+                        f"（西暦への統一を推奨）")
+                else:
+                    lines.append(
+                        f"  - japanese_era: \"{w['column']}\" has {w['count']} value(s) in a "
+                        f"Japanese-era form (prefer ISO dates)")
+        return lines
+
+
+_EVIDENCE_ORDER = {"name+value": 0, "value": 1, "name": 2, "stat": 3}
+
+
+def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
+         info: Sequence[Mapping[str, Any]], packs: Sequence[Pack],
+         *, cfg_roles: Optional[Mapping[str, str]] = None) -> Findings:
+    """Evaluate packs against the columns.  ``info`` is ``inspect_table``'s output.
+
+    ``cfg_roles`` maps column -> declared role value (``id``/``qi``/...); pass
+    ``None`` for ``inspect`` (no config yet) to suppress ``role_mismatch``.
+    Cell values are never placed in the returned findings — only aggregates,
+    column names, and rule ids.
+    """
+    pos = {h: i for i, h in enumerate(header)}
+    packs_list = [p.id for p in packs]
+    cols: dict[str, ColumnFindings] = {h: ColumnFindings() for h in header}
+    extras: dict[str, dict] = {}
+    warnings: list[dict] = []
+
+    for c in info:
+        name = c["name"]
+        idx = pos[name]
+        values = [r[idx] for r in rows]
+        nonempty = [v for v in values if v != ""]
+        norm_name = _norm_name(name)
+        cf = cols[name]
+
+        best: Optional[tuple[int, Rule]] = None      # (evidence rank, rule) for _suggest
+        for pack in packs:
+            for rule in pack.rules:
+                name_match = bool(rule.column_names) and norm_name in rule.column_names
+                shape_match = rule.shape is not None and any(
+                    rule.shape.match(v) for v in nonempty)    # type: ignore[union-attr]
+                check_match = rule.check is not None and any(
+                    _eval_check(rule.check, v) == "match" for v in nonempty)   # type: ignore[union-attr]
+                value_signal = shape_match or check_match
+                if not (name_match or value_signal):
+                    continue
+                if name_match and value_signal:
+                    evi = "name+value"
+                elif value_signal:
+                    evi = "value"
+                else:
+                    evi = "name"
+
+                # check aggregates (three-valued)
+                if rule.check is not None:
+                    agg = {"match": 0, "mismatch": 0, "cannot_check": 0}
+                    for v in values:
+                        agg[_eval_check(rule.check, v)] += 1
+                    cf.checks.append({"pack": pack.id, "rule": rule.id,
+                                      "kind": rule.check.kind, **agg})   # type: ignore[union-attr]
+
+                # leak count (values that look like a direct identifier — a shape
+                # match, or a check match when the rule has no shape, e.g. email.
+                # No value is emitted, only the count.)
+                if rule.leak:
+                    if rule.shape is not None:
+                        n = sum(1 for v in nonempty if rule.shape.match(v))   # type: ignore[union-attr]
+                    elif rule.check is not None:
+                        n = sum(1 for v in nonempty
+                                if _eval_check(rule.check, v) == "match")     # type: ignore[union-attr]
+                    else:
+                        n = 0
+                    if n:
+                        cf.leaks.append({"pack": pack.id, "rule": rule.id, "count": n})
+
+                # candidate for the template
+                if rule.suggest is not None:
+                    cf.candidates.append({"pack": pack.id, "rule": rule.id,
+                                          "evidence": evi, "suggest": dict(rule.suggest)})
+                    rank = _EVIDENCE_ORDER[evi]
+                    if best is None or rank < best[0]:
+                        best = (rank, rule)
+
+        if best is not None:
+            extras[name] = {"_suggest": dict(best[1].suggest),
+                            "_candidates": [cand for cand in cf.candidates]}
+
+        # observation warnings (always emitted when scanning; value-shape only,
+        # no cell values): full/half-width mixing and Japanese-era dates
+        mixed = sum(1 for v in nonempty if _has_fullwidth(v) and _has_halfwidth(v))
+        if mixed:
+            warnings.append({"code": "mixed_form", "column": name, "mixed_values": mixed})
+        era = sum(1 for v in nonempty if _ERA.search(v))
+        if era:
+            warnings.append({"code": "japanese_era", "column": name, "count": era})
+
+    # role_mismatch: a column suggested 'qi' (evidence name+value or value) but
+    # declared keep / sensitive in the config.  Inspect has no config -> skipped.
+    if cfg_roles is not None:
+        for name, cf in cols.items():
+            declared = cfg_roles.get(name)
+            if declared not in ("keep", "sensitive"):
+                continue
+            for cand in cf.candidates:
+                if cand["suggest"].get("role") == "qi" and cand["evidence"] in ("name+value", "value"):
+                    warnings.append({"code": "role_mismatch", "column": name,
+                                     "declared": declared, "suggested": "qi",
+                                     "evidence": cand["evidence"]})
+                    break
+
+    return Findings(packs_list, cols, warnings, extras)
