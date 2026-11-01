@@ -138,7 +138,8 @@ class T4TemplateByteEquality(unittest.TestCase):
             tpl = os.path.join(d, "t.json")
             call("inspect", os.path.join(REPO, "examples", "people.csv"),
                  "--config-out", tpl, "--hint-pack", pack, "--no-builtin-hints")
-            t = json.load(open(tpl))
+            with open(tpl) as fh:
+                t = json.load(fh)
             # candidate column gains _suggest / _candidates
             self.assertIn("_suggest", t["columns"]["zip"])
             self.assertEqual(t["columns"]["zip"]["_suggest"]["length"], 4)
@@ -163,7 +164,8 @@ class T5SuggestAppears(unittest.TestCase):
                               "--no-builtin-hints")
             self.assertEqual(rc, 0)
             self.assertIn("hint-pack p/zip", out)
-            t = json.load(open(tpl))
+            with open(tpl) as fh:
+                t = json.load(fh)
             self.assertEqual(t["columns"]["zip"]["_suggest"],
                              {"role": "qi", "type": "prefix", "length": 4})
 
@@ -188,11 +190,13 @@ class T6LeakCheck(unittest.TestCase):
             rc, _, _ = call("plan", src, "-c", cfg, "--hint-pack", pack,
                             "--no-builtin-hints", "--findings-json", fj, "--quiet")
             self.assertEqual(rc, 0)
-            f = json.load(open(fj))
+            with open(fj) as fh:
+                f = json.load(fh)
             leaks = f["columns"]["card"]["leaks"]
             self.assertEqual(leaks[0]["count"], 2)
             # no cell value anywhere in the findings
-            self.assertNotIn("4242424242424242", open(fj).read())
+            with open(fj) as fh:
+                self.assertNotIn("4242424242424242", fh.read())
 
 
 class T7ValueShape(unittest.TestCase):
@@ -220,7 +224,8 @@ class T7ValueShape(unittest.TestCase):
                      "check": {"kind": "set", "values": ["1500001"]}}]}).encode())
             from sieve_crowd.engine import inspect_table
             from sieve_crowd.tableio import read_any
-            header, rows = read_any(open(src, "rb").read(), "csv", None)
+            with open(src, "rb") as fh:
+                header, rows = read_any(fh.read(), "csv", None)
             packs = load_packs([pack], include_builtin=False)
             f = scan(header, rows, inspect_table(header, rows), packs)
             chk = f.columns["col"].checks[0]
@@ -243,7 +248,8 @@ class T8SetRangeChecks(unittest.TestCase):
                      "check": {"kind": "range", "min": 0, "max": 120}}]}).encode())
             from sieve_crowd.engine import inspect_table
             from sieve_crowd.tableio import read_any
-            header, rows = read_any(open(src, "rb").read(), "csv", None)
+            with open(src, "rb") as fh:
+                header, rows = read_any(fh.read(), "csv", None)
             packs = load_packs([pack], include_builtin=False)
             f = scan(header, rows, inspect_table(header, rows), packs)
             pref = next(c for c in f.columns["pref"].checks if c["rule"] == "pref")
@@ -333,7 +339,8 @@ class T12FindingsNoCellValues(unittest.TestCase):
             rc, _, err = call("plan", src, "-c", cfg, "--hint-pack", m,
                               "--findings-json", fj, "--quiet")
             self.assertEqual(rc, 0)
-            raw = open(fj).read()
+            with open(fj) as fh:
+                raw = fh.read()
             f = json.loads(raw)
             codes = [w["code"] for w in f["warnings"]]
             self.assertIn("role_mismatch", codes)
@@ -352,7 +359,8 @@ class T12FindingsNoCellValues(unittest.TestCase):
             fj = _write(d, "f.json", b"")
             call("plan", src, "-c", cfg, "--hint-pack", m, "--no-builtin-hints",
                  "--findings-json", fj, "--quiet")
-            f = json.load(open(fj))
+            with open(fj) as fh:
+                f = json.load(fh)
             codes = [w["code"] for w in f["warnings"]]
             self.assertIn("mixed_form", codes)
             self.assertIn("japanese_era", codes)
@@ -375,7 +383,8 @@ class T13NoBuiltinAndDuplicates(unittest.TestCase):
             fj = _write(d, "f.json", b"")
             call("plan", src, "-c", cfg, "--hint-pack", pack, "--no-builtin-hints",
                  "--findings-json", fj, "--quiet")
-            f = json.load(open(fj))
+            with open(fj) as fh:
+                f = json.load(fh)
             self.assertEqual(f["packs"], ["only"])
 
     def test_duplicate_pack_id_rejected(self):
@@ -401,7 +410,8 @@ class T13NoBuiltinAndDuplicates(unittest.TestCase):
                      "suggest": {"role": "id"}}]}).encode())
             fj = _write(d, "f.json", b"")
             call("plan", src, "-c", cfg, "--hint-pack", p1, "--findings-json", fj, "--quiet")
-            f = json.load(open(fj))
+            with open(fj) as fh:
+                f = json.load(fh)
             # v0.5.1 load order: builtin first, then the command-line order (T18 pins pack_info likewise)
             self.assertEqual(f["packs"], ["jp-basic", "extra"])
 
@@ -429,7 +439,8 @@ class T14DefaultOn(unittest.TestCase):
             fj = _write(d, "f.json", b"")
             rc, _, err = call("plan", src, "-c", cfg, "--findings-json", fj, "--quiet")
             self.assertEqual(rc, 0, err)
-            f = json.load(open(fj))
+            with open(fj) as fh:
+                f = json.load(fh)
             self.assertEqual(f["packs"], ["jp-basic"])        # builtin loaded without options
             self.assertEqual(err, "")                          # quiet plan stays silent (no pack line)
 
@@ -456,7 +467,8 @@ class T14DefaultOn(unittest.TestCase):
                     {"id": "r", "when": {"column_names": ["__none__"]}}]}).encode())
             fj = _write(d, "f.json", b"")
             call("inspect", src, "--hint-pack", pack, "--findings-json", fj)
-            f = json.load(open(fj))
+            with open(fj) as fh:
+                f = json.load(fh)
             self.assertEqual(f["packs"], ["jp-basic", "p"])   # builtin + the given pack
 
 
@@ -483,7 +495,8 @@ class T15LeakRoles(unittest.TestCase):
             fj = _write(d, "f.json", b"")
             rc, out, err = call("plan", src, "-c", cfg, "--findings-json", fj)
             self.assertEqual(rc, 0)
-            f = json.load(open(fj))
+            with open(fj) as fh:
+                f = json.load(fh)
             memo = f["columns"]["memo"]
             leak = next(l for l in memo["leaks"] if l["rule"] == "jp-phone")
             self.assertEqual(leak["count"], 1)
@@ -499,7 +512,8 @@ class T15LeakRoles(unittest.TestCase):
             self.assertIn('leak: "memo"', err)               # stderr warning line
             self.assertIn("may contain jp-basic/jp-phone", err)
             self.assertNotIn("03-1234-5678", err)            # no cell value anywhere
-            self.assertNotIn("03-1234-5678", open(fj).read())
+            with open(fj) as fh:
+                self.assertNotIn("03-1234-5678", fh.read())
 
     def test_inspect_records_all_columns_without_stderr_warning(self):
         with tempfile.TemporaryDirectory() as d:
@@ -507,7 +521,8 @@ class T15LeakRoles(unittest.TestCase):
             fj = _write(d, "f.json", b"")
             rc, out, err = call("inspect", src, "--findings-json", fj)
             self.assertEqual(rc, 0)
-            f = json.load(open(fj))
+            with open(fj) as fh:
+                f = json.load(fh)
             self.assertIn("leaks", f["columns"]["memo"])
             self.assertIn("leaks", f["columns"]["secret"])   # inspect records every column
             self.assertNotIn("declared_role", f["columns"]["memo"])
@@ -541,7 +556,8 @@ class T16SubstringScan(unittest.TestCase):
             fj = _write(d, "f.json", b"")
             rc, _, err = call("plan", src, "-c", cfg, "--findings-json", fj, "--quiet")
             self.assertEqual(rc, 0, err)
-            f = json.load(open(fj))
+            with open(fj) as fh:
+                f = json.load(fh)
             return f["columns"]["memo"].get("leaks", [])
 
     def test_numbers_inside_prose_are_detected(self):
@@ -600,7 +616,8 @@ class T17DuplicateIdsRefused(unittest.TestCase):
             rc, _, err = call("plan", src, "-c", cfg, "--hint-pack", pack, "--no-builtin-hints",
                               "--findings-json", fj, "--quiet")
             self.assertEqual(rc, 0, err)
-            f = json.load(open(fj))
+            with open(fj) as fh:
+                f = json.load(fh)
             self.assertEqual(f["packs"], ["jp-basic"])   # the user copy, builtin absent
 
     def test_rule_id_clash_with_builtin_refused(self):
@@ -660,7 +677,8 @@ class T18PackInfo(unittest.TestCase):
             src = _write(d, "in.csv", self.CSV)
             fj = _write(d, "f.json", b"")
             call("inspect", src, "--hint-pack", pack, "--findings-json", fj)
-            f = json.load(open(fj))
+            with open(fj) as fh:
+                f = json.load(fh)
             info = f["pack_info"]
             self.assertEqual([p["id"] for p in info], ["jp-basic", "mypack"])  # load order
             b = info[0]
@@ -670,7 +688,8 @@ class T18PackInfo(unittest.TestCase):
             m = info[1]
             self.assertEqual(m["source"], "file")
             self.assertEqual(m["version"], "0.1.0")
-            self.assertEqual(m["sha256"], hashlib.sha256(open(pack, "rb").read()).hexdigest())
+            with open(pack, "rb") as fh:
+                self.assertEqual(m["sha256"], hashlib.sha256(fh.read()).hexdigest())
 
     def test_pack_info_stable_across_runs_and_packs_unchanged(self):
         with tempfile.TemporaryDirectory() as d:
@@ -679,7 +698,10 @@ class T18PackInfo(unittest.TestCase):
             fj2 = _write(d, "f2.json", b"")
             call("inspect", src, "--findings-json", fj1)
             call("inspect", src, "--findings-json", fj2)
-            f1, f2 = json.load(open(fj1)), json.load(open(fj2))
+            with open(fj1) as fh:
+                f1 = json.load(fh)
+            with open(fj2) as fh:
+                f2 = json.load(fh)
             self.assertEqual(f1["pack_info"], f2["pack_info"])   # same input -> same bytes
             self.assertEqual(f1["packs"], ["jp-basic"])          # packs stays a string list
 
@@ -725,13 +747,15 @@ class T19SentinelsAndPins(unittest.TestCase):
             fj = _write(d, "f.json", b"")
             rc, out, err = call("plan", src, "-c", cfg, "--findings-json", fj)
             self.assertEqual(rc, 0)
-            self._sentinel_free(out, err, open(fj).read())
+            with open(fj) as fh:
+                self._sentinel_free(out, err, fh.read())
             # inspect too: stdout, stderr, findings, and the template
             # (the template path must NOT pre-exist: --config-out refuses existing files)
             tpl = os.path.join(d, "t.json")
             rc, out, err = call("inspect", src, "--config-out", tpl, "--findings-json", fj)
             self.assertEqual(rc, 0)
-            self._sentinel_free(out, err, open(fj).read(), open(tpl).read())
+            with open(fj) as fh, open(tpl) as fh2:
+                self._sentinel_free(out, err, fh.read(), fh2.read())
 
     def test_run_table_and_import_block_unchanged(self):
         # explicit re-pin of T1 for v0.5.1 (run is untouched by A/B/C/D)
