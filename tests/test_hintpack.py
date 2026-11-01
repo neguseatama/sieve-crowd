@@ -1,4 +1,4 @@
-"""Hint-pack tests (T1–T13).
+"""Hint-pack tests (T1–T26).
 
 T1 pins the run path byte-for-byte: ``run`` never imports :mod:`hintpack`, and
 its output table is the v0.4.0 golden (sha256-pinned).  The remaining tests
@@ -24,8 +24,11 @@ RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae040061500
 # v0.4.0 inspect template (--config-out without hint packs). Since v0.5.1 the
 # byte-exact route is reached with --no-builtin-hints (T4/T14); value unchanged.
 TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159"
-# New pin (v0.5.1): the default-on (builtin loaded) inspect template, people.csv.
-TEMPLATE_SHA2 = "06bb4afaad3b7d8d2967842e2a95a5ef6df3a5932a58f67fe9469ea199fbad7b"
+# New pin (v0.5.1, updated v0.6.0 for jp-birthdate): the default-on (builtin
+# loaded) inspect template, people.csv.
+TEMPLATE_SHA2 = "4d8db025feae99273c9d4d22bea4af6b937d010d238eb7ad164eecaf6de47ae6"
+# New pin (v0.6.0): the builtin jp-basic 1.1.0 pack bytes (jp-birthdate added).
+BUILTIN_PACK_SHA = "ec6aceea5fc2a735cbb7cf43bc769858b3fa679c04ad675b9b13031ff21d215c"
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -684,7 +687,7 @@ class T18PackInfo(unittest.TestCase):
             self.assertEqual([p["id"] for p in info], ["jp-basic", "mypack"])  # load order
             b = info[0]
             self.assertEqual(b["source"], "builtin")
-            self.assertEqual(b["version"], "1.0.0")
+            self.assertEqual(b["version"], "1.1.0")      # v0.6.0: jp-birthdate added
             self.assertEqual(set(b), {"id", "version", "source", "sha256"})
             m = info[1]
             self.assertEqual(m["source"], "file")
@@ -759,7 +762,8 @@ class T19SentinelsAndPins(unittest.TestCase):
                 self._sentinel_free(out, err, fh.read(), fh2.read())
 
     def test_run_table_and_import_block_unchanged(self):
-        # explicit re-pin of T1 for v0.5.1 (run is untouched by A/B/C/D)
+        # explicit re-pin of T1 for v0.6.0 (run is untouched by the derived work;
+        # the import block now covers sieve_crowd.derived as well)
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "out.csv")
             rc, _, _ = call("run", os.path.join(REPO, "examples", "people.csv"),
@@ -776,11 +780,12 @@ class T19SentinelsAndPins(unittest.TestCase):
             "from sieve_crowd.cli import main; "
             "d = tempfile.mkdtemp(); o = os.path.join(d, 'o.csv'); "
             "main(['run', %r, '-c', %r, '-o', o, '--quiet']); "
-            "print('HINTPACK_IMPORTED' if 'sieve_crowd.hintpack' in sys.modules else 'OK')"
+            "blocked = {'sieve_crowd.hintpack', 'sieve_crowd.derived'} & set(sys.modules); "
+            "print('OK' if not blocked else 'IMPORTED:' + ','.join(sorted(blocked)))"
         ) % (people, config)
         out = subprocess.check_output([sys.executable, "-c", code], text=True)
         self.assertIn("OK", out)
-        self.assertNotIn("HINTPACK_IMPORTED", out)
+        self.assertNotIn("IMPORTED:", out)
 
 
 class T20CandidateOrder(unittest.TestCase):
@@ -920,6 +925,87 @@ class T20CandidateOrder(unittest.TestCase):
                              [("r-nv", "name+value"), ("r-value", "value"),
                               ("r-name", "name")])
             self.assertEqual(sug, {"role": "qi", "note": "NV"})
+
+
+# --------------------------------------------------------------------------- #
+class T26JpBirthdate(unittest.TestCase):
+    """T26 (v0.6.0): the builtin jp-basic pack gains the jp-birthdate rule
+    (column names + the ``#{4}-#{2}-#{2}`` shape, suggest role qi type date)
+    and is versioned 1.1.0.  The detection mechanism is the existing one (a
+    name match or one shape-matching cell — the same any-1-cell signal every
+    other suggest rule uses); the pack bytes and the default-on template get
+    their own sha256 pins."""
+
+    def test_birth_date_candidate_on_people(self):
+        rc, out, _ = call("inspect", os.path.join(REPO, "examples", "people.csv"))
+        self.assertEqual(rc, 0)
+        self.assertIn("hint-pack jp-basic/jp-birthdate: suggests role=qi, type=date "
+                      "(evidence: name+value)", out)
+
+    def test_role_mismatch_fires_on_keep_not_on_drop(self):
+        csv = b"name,birth_date,age\nA,1986-11-02,40\nB,2003-01-03,23\nC,1999-12-31,26\n"
+        base = {"name": {"role": "id", "action": "drop"},
+                "age": {"role": "qi", "type": "numeric", "widths": [5, 10]}}
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", csv)
+            cfg = _write(d, "c.json", json.dumps(
+                {"k": 2, "columns": {**base, "birth_date": {"role": "keep"}}}).encode())
+            fj = _write(d, "f.json", b"")
+            rc, _, err = call("plan", src, "-c", cfg, "--findings-json", fj, "--quiet")
+            self.assertEqual(rc, 0)
+            with open(fj) as fh:
+                f = json.load(fh)
+            rm = [w for w in f["warnings"] if w["code"] == "role_mismatch"]
+            self.assertEqual([w["column"] for w in rm], ["birth_date"])
+            self.assertEqual(rm[0]["declared"], "keep")
+            self.assertEqual(rm[0]["suggested"], "qi")
+            self.assertEqual(rm[0]["evidence"], "name+value")
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", csv)
+            cfg = _write(d, "c.json", json.dumps(
+                {"k": 2, "columns": {**base,
+                                     "birth_date": {"role": "id", "action": "drop"}}}).encode())
+            fj = _write(d, "f.json", b"")
+            rc, _, _ = call("plan", src, "-c", cfg, "--findings-json", fj, "--quiet")
+            self.assertEqual(rc, 0)
+            with open(fj) as fh:
+                f = json.load(fh)
+            self.assertEqual(f["warnings"], [])   # id/drop columns never mismatch
+
+    def test_non_iso_shape_keeps_name_evidence_only(self):
+        # slash-dated values do not match the shape: the candidate survives on
+        # the name evidence, but role_mismatch (name+value / value only) does not
+        csv = b"name,birth_date,age\nA,1986/11/02,40\nB,2003/01/03,23\nC,1999/12/31,26\n"
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", csv)
+            cfg = _write(d, "c.json", json.dumps(
+                {"k": 2, "columns": {"name": {"role": "id", "action": "drop"},
+                                     "birth_date": {"role": "keep"},
+                                     "age": {"role": "qi", "type": "numeric",
+                                             "widths": [5, 10]}}}).encode())
+            fj = _write(d, "f.json", b"")
+            rc, _, _ = call("plan", src, "-c", cfg, "--findings-json", fj, "--quiet")
+            self.assertEqual(rc, 0)
+            with open(fj) as fh:
+                f = json.load(fh)
+            self.assertEqual([w["code"] for w in f["warnings"]], [])
+            cand = f["columns"]["birth_date"]["candidates"][0]
+            self.assertEqual(cand["rule"], "jp-birthdate")
+            self.assertEqual(cand["evidence"], "name")
+            self.assertEqual(cand["suggest"], {"role": "qi", "type": "date"})
+
+    def test_builtin_version_and_pack_bytes_are_pinned(self):
+        from sieve_crowd.hintpack_builtin import BUILTIN_PACK_BYTES
+        self.assertEqual(hashlib.sha256(BUILTIN_PACK_BYTES).hexdigest(),
+                         BUILTIN_PACK_SHA)
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", b"zip\n1500001\n")
+            fj = _write(d, "f.json", b"")
+            call("inspect", src, "--findings-json", fj)
+            with open(fj) as fh:
+                f = json.load(fh)
+            self.assertEqual(f["pack_info"][0]["version"], "1.1.0")
+            self.assertEqual(f["pack_info"][0]["sha256"], BUILTIN_PACK_SHA)
 
 
 if __name__ == "__main__":

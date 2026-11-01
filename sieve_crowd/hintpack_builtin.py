@@ -37,12 +37,12 @@ assert len(_PREF_TO_REGION) == 47
 _PACK = {
     "schema": 1,
     "id": "jp-basic",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "_comment": (
         "Built-in hints for common Japanese columns. Region classification "
         "follows the 総務省/e-Stat eight-block 地方ブロック grouping: 三重=近畿, "
-        "新潟=中部, 長野/岐阜=中部. Hints never affect the run output; edit this "
-        "pack to change a standard."
+        "新潟=中部, 長野/岐阜=中部. 1.1.0 adds jp-birthdate (ISO YYYY-MM-DD). "
+        "Hints never affect the run output; edit this pack to change a standard."
     ),
     "rules": [
         {
@@ -81,6 +81,14 @@ _PACK = {
             "check": {"kind": "set", "values": list(_PREF_TO_REGION)},
             "suggest": {"role": "qi", "type": "category",
                         "hierarchy": {p: [r] for p, r in _PREF_TO_REGION.items()}},
+        },
+        {
+            "id": "jp-birthdate",
+            "when": {"column_names": ["birth_date", "birthdate", "date_of_birth",
+                                      "dob", "birthday", "birth",
+                                      "生年月日", "誕生年月日", "誕生日"],
+                     "value_shape": "#{4}-#{2}-#{2}"},
+            "suggest": {"role": "qi", "type": "date"},
         },
         {
             "id": "jp-age",
