@@ -174,6 +174,16 @@ python -m unittest discover -s tests -v
 
 外部依存なし（標準ライブラリのみ）で全てのテストスイートが実行されます。
 
+テストスイートには、Sieve Schema Contract v1 適合コーパス (受理/拒否
+44 ケース) の sha256 pin 付き複製が同梱されています。コーパスの正本と
+契約書 (`docs/SCHEMA_CONTRACT_v1.md`)・正本エンジン
+(`sieve_lens_ext/schema.py`) は sieve-lens リポジトリで管理されています。
+複製が実測するのは Crowd の JSON コア (`sieve_crowd.jsonio`) で、重複キーと
+`NaN`/`Infinity` を拒否します。UTF-8 BOM のケースは宣言済みの差異
+(declared divergence) です — Crowd は表計算ソフトの書き出し (BOM 付き) を
+意図して `utf-8-sig` でデコードするため、契約の適合マトリクス (§6) の
+宣言どおり、ランナーは拒否ではなく受理を pin します。
+
 ---
 
 ## ⚠️ 既知の限界と注意点

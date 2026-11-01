@@ -174,6 +174,17 @@ python -m unittest discover -s tests -v
 
 All test suites run with no external dependencies (standard library only).
 
+The suite also carries a sha256-pinned replica of the Sieve Schema
+Contract v1 conformance corpus (44 accept/reject cases, maintained in
+the sieve-lens repository, which hosts the contract text
+`docs/SCHEMA_CONTRACT_v1.md` and the canonical engine
+`sieve_lens_ext/schema.py`). The replica exercises Crowd's JSON core
+(`sieve_crowd.jsonio`): duplicate keys and `NaN`/`Infinity` are
+refused. The UTF-8 BOM case is a declared divergence — Crowd decodes
+with `utf-8-sig` on purpose (spreadsheet exports carry a BOM), so the
+runner pins the acceptance instead of the refusal, as declared in the
+contract's conformance matrix (§6).
+
 ---
 
 ## ⚠️ Known limitations and caveats
