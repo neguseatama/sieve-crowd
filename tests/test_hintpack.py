@@ -1,0 +1,399 @@
+"""Hint-pack tests (T1–T13).
+
+T1 pins the run path byte-for-byte: ``run`` never imports :mod:`hintpack`, and
+its output table is the v0.4.0 golden (sha256-pinned).  The remaining tests
+cover the opt-in feature on ``inspect`` / ``plan`` only.
+"""
+import contextlib
+import hashlib
+import io
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+from sieve_crowd.cli import main
+from sieve_crowd.config import parse_config
+from sieve_crowd.generalize import make_generalizer
+from sieve_crowd.hintpack import _compile_shape, load_packs, scan
+from sieve_crowd.model import ConfigError
+
+# Golden sha256 captured from v0.4.0 (run path unchanged; T1 pins it).
+RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae040061500e"
+TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159"
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def call(*argv):
+    err, out = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+        try:
+            rc = main(list(argv))
+        except SystemExit as exc:          # argparse exits (e.g. --hint-pack on run)
+            rc = exc.code if isinstance(exc.code, int) else 2
+    return rc, out.getvalue(), err.getvalue()
+
+
+def _write(d, name, data):
+    p = os.path.join(d, name)
+    with open(p, "wb") as fh:
+        fh.write(data)
+    return p
+
+
+def _minimal_pack(d, name="m.json"):
+    """A valid pack whose single rule matches no real column — a carrier so
+    that ``--hint-pack`` is given (and the builtin loads unless suppressed)."""
+    return _write(d, name, json.dumps(
+        {"schema": 1, "id": "minimal", "rules": [
+            {"id": "noop", "when": {"column_names": ["__none__"]}}]}).encode())
+
+
+# --------------------------------------------------------------------------- #
+class T1RunUnchanged(unittest.TestCase):
+    def test_run_table_matches_golden_sha(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "out.csv")
+            rc, _, _ = call("run", os.path.join(REPO, "examples", "people.csv"),
+                            "-c", os.path.join(REPO, "examples", "config.json"),
+                            "-o", out, "--quiet")
+            self.assertEqual(rc, 0)
+            with open(out, "rb") as fh:
+                digest = hashlib.sha256(fh.read()).hexdigest()
+            self.assertEqual(digest, RUN_TABLE_SHA)
+
+    def test_run_never_imports_hintpack(self):
+        import subprocess
+        people = os.path.join(REPO, "examples", "people.csv")
+        config = os.path.join(REPO, "examples", "config.json")
+        code = (
+            "import sys, os, tempfile; "
+            "from sieve_crowd.cli import main; "
+            "d = tempfile.mkdtemp(); o = os.path.join(d, 'o.csv'); "
+            "main(['run', %r, '-c', %r, '-o', o, '--quiet']); "
+            "print('HINTPACK_IMPORTED' if 'sieve_crowd.hintpack' in sys.modules else 'OK')"
+        ) % (people, config)
+        out = subprocess.check_output([sys.executable, "-c", code], text=True)
+        self.assertIn("OK", out)
+        self.assertNotIn("HINTPACK_IMPORTED", out)
+
+
+class T2RunRejectsHintPack(unittest.TestCase):
+    def test_run_has_no_hint_pack_flag(self):
+        with tempfile.TemporaryDirectory() as d:
+            rc, _, err = call("run", os.path.join(REPO, "examples", "people.csv"),
+                              "-c", os.path.join(REPO, "examples", "config.json"),
+                              "--dry-run", "--hint-pack", "/dev/null")
+        self.assertEqual(rc, 2)
+        self.assertIn("unrecognized arguments", err)
+
+
+class T3PackLoading(unittest.TestCase):
+    def test_utf8_sig_bom_pack_reads(self):
+        pack = b"\xef\xbb\xbf" + json.dumps(
+            {"schema": 1, "id": "bom", "rules": [
+                {"id": "r1", "when": {"column_names": ["x"]}, "leak": True}]}
+        ).encode()
+        with tempfile.TemporaryDirectory() as d:
+            p = _write(d, "bom.json", pack)
+            packs = load_packs([p], include_builtin=False)
+        self.assertEqual([x.id for x in packs], ["bom"])
+
+    def test_bad_json_and_schema_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = _write(d, "bad.json", b"{not json")
+            with self.assertRaises(ConfigError):
+                load_packs([p], include_builtin=False)
+            p2 = _write(d, "sch.json", json.dumps(
+                {"schema": 2, "id": "x", "rules": [{"id": "r", "when": {"column_names": ["a"]}}]}).encode())
+            with self.assertRaises(ConfigError):
+                load_packs([p2], include_builtin=False)
+            with self.assertRaises(ConfigError):
+                load_packs([os.path.join(d, "missing.json")], include_builtin=False)
+
+
+class T4TemplateByteEquality(unittest.TestCase):
+    def test_template_without_pack_matches_golden(self):
+        with tempfile.TemporaryDirectory() as d:
+            tpl = os.path.join(d, "t.json")
+            call("inspect", os.path.join(REPO, "examples", "people.csv"),
+                 "--config-out", tpl)
+            with open(tpl, "rb") as fh:
+                self.assertEqual(hashlib.sha256(fh.read()).hexdigest(), TEMPLATE_SHA)
+
+    def test_template_with_pack_adds_suggest_only_to_candidate_columns(self):
+        with tempfile.TemporaryDirectory() as d:
+            pack = _write(d, "p.json", json.dumps(
+                {"schema": 1, "id": "p", "rules": [
+                    {"id": "zip", "when": {"column_names": ["zip"], "value_shape": "#{7}"},
+                     "suggest": {"role": "qi", "type": "prefix", "length": 4}}]}).encode())
+            tpl = os.path.join(d, "t.json")
+            call("inspect", os.path.join(REPO, "examples", "people.csv"),
+                 "--config-out", tpl, "--hint-pack", pack, "--no-builtin-hints")
+            t = json.load(open(tpl))
+            # candidate column gains _suggest / _candidates
+            self.assertIn("_suggest", t["columns"]["zip"])
+            self.assertEqual(t["columns"]["zip"]["_suggest"]["length"], 4)
+            # non-candidate column is unchanged (role + _hint only, no _suggest)
+            self.assertNotIn("_suggest", t["columns"]["name"])
+            self.assertNotIn("_candidates", t["columns"]["name"])
+
+
+class T5SuggestAppears(unittest.TestCase):
+    """A pack rule that matches a column offers a suggestion (red-first: was
+    absent before the hint-pack feature)."""
+    def test_suggest_for_matching_column(self):
+        csv = b"name,zip\nA,1500001\nB,1500002\nC,1500003\n"
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", csv)
+            pack = _write(d, "p.json", json.dumps(
+                {"schema": 1, "id": "p", "rules": [
+                    {"id": "zip", "when": {"column_names": ["zip"], "value_shape": "#{7}"},
+                     "suggest": {"role": "qi", "type": "prefix", "length": 4}}]}).encode())
+            tpl = os.path.join(d, "t.json")
+            rc, out, _ = call("inspect", src, "--config-out", tpl, "--hint-pack", pack,
+                              "--no-builtin-hints")
+            self.assertEqual(rc, 0)
+            self.assertIn("hint-pack p/zip", out)
+            t = json.load(open(tpl))
+            self.assertEqual(t["columns"]["zip"]["_suggest"],
+                             {"role": "qi", "type": "prefix", "length": 4})
+
+
+class T6LeakCheck(unittest.TestCase):
+    """A Luhn-passing card-shaped value in a non-id column is a leak (count, no value)."""
+    def test_card_leak_counted_without_value(self):
+        # 4242424242424242 passes Luhn; the leak count is reported, never the value.
+        csv = b"memo,card\nx,4242424242424242\ny,4242424242424242\nz,not-a-card\n"
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", csv)
+            cfg = _write(d, "c.json", json.dumps(
+                {"k": 2, "columns": {"memo": {"role": "qi", "type": "exact"},
+                                     "card": {"role": "drop"}}}).encode())
+            pack = _write(d, "p.json", json.dumps(
+                {"schema": 1, "id": "p", "rules": [
+                    {"id": "card", "when": {"value_shape": "#{13,19}"},
+                     "check": {"kind": "luhn"}, "leak": True}]}).encode())
+            fj = _write(d, "f.json", b"")
+            rc, _, _ = call("plan", src, "-c", cfg, "--hint-pack", pack,
+                            "--no-builtin-hints", "--findings-json", fj, "--quiet")
+            self.assertEqual(rc, 0)
+            f = json.load(open(fj))
+            leaks = f["columns"]["card"]["leaks"]
+            self.assertEqual(leaks[0]["count"], 2)
+            # no cell value anywhere in the findings
+            self.assertNotIn("4242424242424242", open(fj).read())
+
+
+class T7ValueShape(unittest.TestCase):
+    def test_shape_atoms_and_quantifiers(self):
+        seven = _compile_shape("#{7}")
+        self.assertTrue(seven.match("1500001"))
+        self.assertFalse(seven.match("1500001".replace("0", "a")))  # not digits
+        ph = _compile_shape("#{2,4}-#{3,4}-#{4}")
+        self.assertTrue(ph.match("03-1234-5678"))
+        self.assertFalse(ph.match("03-1234-567"))          # too short after last -
+        letter = _compile_shape("@{3}")
+        self.assertTrue(letter.match("ABC"))
+        self.assertFalse(letter.match("AB1"))
+        esc = _compile_shape("\\###")                      # literal '#', then 2 digits
+        self.assertTrue(esc.match("#12"))
+        self.assertFalse(esc.match("12"))                  # missing literal '#'
+
+    def test_shape_three_valued_via_scan(self):
+        csv = b"col\n1500001\nabc\nxyz\n"
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", csv)
+            pack = _write(d, "p.json", json.dumps(
+                {"schema": 1, "id": "p", "rules": [
+                    {"id": "s", "when": {"value_shape": "#{7}"},
+                     "check": {"kind": "set", "values": ["1500001"]}}]}).encode())
+            from sieve_crowd.engine import inspect_table
+            from sieve_crowd.tableio import read_any
+            header, rows = read_any(open(src, "rb").read(), "csv", None)
+            packs = load_packs([pack], include_builtin=False)
+            f = scan(header, rows, inspect_table(header, rows), packs)
+            chk = f.columns["col"].checks[0]
+            # set: 1500001 in set -> match; abc, xyz not in set -> mismatch.
+            self.assertEqual(chk["match"], 1)
+            self.assertEqual(chk["mismatch"], 2)
+            self.assertEqual(chk["cannot_check"], 0)
+
+
+class T8SetRangeChecks(unittest.TestCase):
+    def test_set_and_range_aggregates(self):
+        csv = "pref,age\n東京都,40\n大阪府,150\nUnknown,5\n,\n".encode()
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", csv)
+            pack = _write(d, "p.json", json.dumps(
+                {"schema": 1, "id": "p", "rules": [
+                    {"id": "pref", "when": {"column_names": ["pref"]},
+                     "check": {"kind": "set", "values": ["東京都", "大阪府"]}},
+                    {"id": "age", "when": {"column_names": ["age"]},
+                     "check": {"kind": "range", "min": 0, "max": 120}}]}).encode())
+            from sieve_crowd.engine import inspect_table
+            from sieve_crowd.tableio import read_any
+            header, rows = read_any(open(src, "rb").read(), "csv", None)
+            packs = load_packs([pack], include_builtin=False)
+            f = scan(header, rows, inspect_table(header, rows), packs)
+            pref = next(c for c in f.columns["pref"].checks if c["rule"] == "pref")
+            self.assertEqual(pref["match"], 2)            # 東京都, 大阪府
+            self.assertEqual(pref["mismatch"], 1)         # Unknown
+            self.assertEqual(pref["cannot_check"], 1)     # empty
+            age = next(c for c in f.columns["age"].checks if c["rule"] == "age")
+            self.assertEqual(age["match"], 2)             # 40, 5
+            self.assertEqual(age["mismatch"], 1)          # 150
+            self.assertEqual(age["cannot_check"], 1)      # empty
+
+
+class T9CheckVectors(unittest.TestCase):
+    def test_luhn_vectors(self):
+        from sieve_crowd.hintpack import _luhn
+        self.assertTrue(_luhn("4242424242424242"))   # Stripe test card (valid)
+        self.assertFalse(_luhn("4242424242424241"))  # one digit off (invalid)
+
+    def test_my_number_vectors(self):
+        from sieve_crowd.hintpack import _my_number_ok
+        # 11-digit body 12345678901 -> check digit 8 (official residue-11 algorithm).
+        self.assertTrue(_my_number_ok("123456789018"))
+        self.assertFalse(_my_number_ok("123456789019"))   # wrong check digit
+        self.assertFalse(_my_number_ok("1234567890"))      # too short
+
+    def test_email_shape_vectors(self):
+        from sieve_crowd.hintpack import _EMAIL
+        self.assertTrue(_EMAIL.match("a@example.co"))
+        self.assertFalse(_EMAIL.match("not-an-email"))
+
+
+class T10SuggestPin(unittest.TestCase):
+    """jp-basic jp-zip suggests prefix length 4 -> PrefixGen levels 5;
+    the coarsest non-trivial level is 150**** (the next is *)."""
+    def test_zip_suggest_prefixgen(self):
+        packs = load_packs([], include_builtin=True)
+        jp = next(p for p in packs if p.id == "jp-basic")
+        rule = next(r for r in jp.rules if r.id == "jp-zip")
+        self.assertEqual(rule.suggest, {"role": "qi", "type": "prefix", "length": 4})
+        g = make_generalizer({k: v for k, v in rule.suggest.items() if k != "role"})
+        self.assertEqual(g.levels, 5)
+        self.assertEqual(g.label("1500001", 4), "150****")   # coarsest non-trivial
+        self.assertEqual(g.label("1500001", 5), "*")         # the next (final) level
+
+    def test_prefecture_hierarchy_is_a_valid_generalizer(self):
+        packs = load_packs([], include_builtin=True)
+        jp = next(p for p in packs if p.id == "jp-basic")
+        rule = next(r for r in jp.rules if r.id == "jp-prefecture")
+        g = make_generalizer({k: v for k, v in rule.suggest.items() if k != "role"})
+        self.assertEqual(g.levels, 2)                       # value -> region -> *
+        self.assertEqual(g.label("東京都", 1), "関東")
+        self.assertEqual(g.label("三重県", 1), "近畿")       # 案 A: 三重 = 近畿
+        self.assertEqual(g.label("新潟県", 1), "中部")       # 案 A: 新潟 = 中部
+
+
+class T11ParseConfigPasses(unittest.TestCase):
+    """A template carrying _suggest / _candidates (after the user fills roles)
+    passes parse_config: the _ keys are stripped, not rejected as unknown."""
+    def test_suggest_keys_stripped(self):
+        tmpl = {
+            "k": 5, "l": 1, "max_suppression": 0.05,
+            "columns": {
+                "zip": {"role": "qi", "type": "prefix", "length": 4,
+                        "_suggest": {"role": "qi", "type": "prefix", "length": 4},
+                        "_candidates": [{"pack": "jp-basic", "rule": "jp-zip",
+                                         "evidence": "name+value"}]},
+                "name": {"role": "id", "action": "drop"},
+            },
+        }
+        cfg = parse_config(tmpl)   # must not raise on the _ keys
+        self.assertIn("zip", cfg.columns)
+
+
+class T12FindingsNoCellValues(unittest.TestCase):
+    def test_role_mismatch_and_no_values(self):
+        # zip is declared 'keep' but jp-basic suggests 'qi' (evidence name+value).
+        # age is qi so the config is valid (parse_config needs >= 1 qi column).
+        csv = b"name,zip,age\nA,1500001,40\nB,1500002,40\nC,1500003,40\n"
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", csv)
+            cfg = _write(d, "c.json", json.dumps(
+                {"k": 2, "columns": {"name": {"role": "id", "action": "drop"},
+                                     "zip": {"role": "keep"},
+                                     "age": {"role": "qi", "type": "numeric", "widths": [5, 10]}}}).encode())
+            m = _minimal_pack(d)
+            fj = _write(d, "f.json", b"")
+            rc, _, err = call("plan", src, "-c", cfg, "--hint-pack", m,
+                              "--findings-json", fj, "--quiet")
+            self.assertEqual(rc, 0)
+            raw = open(fj).read()
+            f = json.loads(raw)
+            codes = [w["code"] for w in f["warnings"]]
+            self.assertIn("role_mismatch", codes)
+            # no cell value leaks into findings
+            for v in ("1500001", "1500002", "1500003"):
+                self.assertNotIn(v, raw)
+
+    def test_mixed_form_and_era_warnings(self):
+        # full-width and half-width digits in one value; a Japanese-era value.
+        csv = "col\n１２abc\n令和5年\n100\n".encode()
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", csv)
+            cfg = _write(d, "c.json", json.dumps(
+                {"k": 2, "columns": {"col": {"role": "qi", "type": "exact"}}}).encode())
+            m = _minimal_pack(d)
+            fj = _write(d, "f.json", b"")
+            call("plan", src, "-c", cfg, "--hint-pack", m, "--no-builtin-hints",
+                 "--findings-json", fj, "--quiet")
+            f = json.load(open(fj))
+            codes = [w["code"] for w in f["warnings"]]
+            self.assertIn("mixed_form", codes)
+            self.assertIn("japanese_era", codes)
+
+
+class T13NoBuiltinAndDuplicates(unittest.TestCase):
+    def test_no_builtin_hints_excludes_jp_basic(self):
+        # A user pack alone, with --no-builtin-hints: jp-basic is absent.
+        csv = b"zip\n1500001\n"
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", csv)
+            cfg = _write(d, "c.json", json.dumps(
+                {"k": 2, "columns": {"zip": {"role": "qi", "type": "prefix", "length": 4}}}).encode())
+            pack = _write(d, "p.json", json.dumps(
+                {"schema": 1, "id": "only", "rules": [
+                    {"id": "z", "when": {"column_names": ["zip"]},
+                     "suggest": {"role": "id"}}]}).encode())
+            fj = _write(d, "f.json", b"")
+            call("plan", src, "-c", cfg, "--hint-pack", pack, "--no-builtin-hints",
+                 "--findings-json", fj, "--quiet")
+            f = json.load(open(fj))
+            self.assertEqual(f["packs"], ["only"])
+
+    def test_duplicate_pack_id_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            p1 = _write(d, "a.json", json.dumps(
+                {"schema": 1, "id": "dup", "rules": [
+                    {"id": "r", "when": {"column_names": ["x"]}}]}).encode())
+            p2 = _write(d, "b.json", json.dumps(
+                {"schema": 1, "id": "dup", "rules": [
+                    {"id": "r2", "when": {"column_names": ["y"]}}]}).encode())
+            with self.assertRaises(ConfigError):
+                load_packs([p1, p2], include_builtin=False)
+
+    def test_multiple_packs_compose(self):
+        csv = b"zip\n1500001\n"
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", csv)
+            cfg = _write(d, "c.json", json.dumps(
+                {"k": 2, "columns": {"zip": {"role": "qi", "type": "prefix", "length": 4}}}).encode())
+            p1 = _write(d, "a.json", json.dumps(
+                {"schema": 1, "id": "extra", "rules": [
+                    {"id": "z", "when": {"column_names": ["zip"]},
+                     "suggest": {"role": "id"}}]}).encode())
+            fj = _write(d, "f.json", b"")
+            call("plan", src, "-c", cfg, "--hint-pack", p1, "--findings-json", fj, "--quiet")
+            f = json.load(open(fj))
+            self.assertEqual(f["packs"], ["extra", "jp-basic"])
+
+
+if __name__ == "__main__":
+    unittest.main()
