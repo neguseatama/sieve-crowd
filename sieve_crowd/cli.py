@@ -137,6 +137,18 @@ def _delimiter(given: Optional[str], sides: set[str]) -> Optional[str]:
     return given
 
 
+def _packs_line(pack_info: Sequence[Mapping], en: bool) -> str:
+    """D (v0.5.1): one leading line naming the loaded packs (recommended)."""
+    parts = []
+    for p in pack_info:
+        if en:
+            src = "builtin" if p["source"] == "builtin" else "file"
+        else:
+            src = "内蔵" if p["source"] == "builtin" else "ファイル"
+        parts.append(f"{p['id']} ({src})")
+    return ("hint packs: " if en else "ヒントパック: ") + ", ".join(parts)
+
+
 def _cmd_inspect(a: argparse.Namespace) -> int:
     try:
         in_fmt = _resolve_format(a.input, a.in_format, dash_default="csv")
@@ -155,6 +167,8 @@ def _cmd_inspect(a: argparse.Namespace) -> int:
     if packs:
         from .hintpack import scan as _scan
         findings = _scan(header, rows, info, packs, cfg_roles=None)
+    if findings:
+        print(_packs_line(findings.pack_info, en))
     print(f"records: {len(rows)}" if en else f"レコード数: {len(rows)}")
     hints = {}
     for c in info:
@@ -347,6 +361,8 @@ def _cmd_plan(a: argparse.Namespace) -> int:
         cfg_roles = {n: spec.role.value for n, spec in cfg.columns.items()}
         findings = _scan(header, rows, report.data["columns"], packs, cfg_roles=cfg_roles)
     if not a.quiet:
+        if findings:
+            print(_packs_line(findings.pack_info, cfg.lang == "ja"), file=sys.stderr)
         print(report.text(cfg.lang), file=sys.stderr)
         if findings:
             for line in findings.warning_lines(cfg.lang):

@@ -643,5 +643,120 @@ class T17DuplicateIdsRefused(unittest.TestCase):
             self.assertIn("b.json", str(cm.exception))   # names the duplicate file (full path)
 
 
+class T18PackInfo(unittest.TestCase):
+    """D (v0.5.1): findings gains a top-level pack_info list — one element per
+    loaded pack ({id, version, source, sha256}) in load order (builtin, then
+    the command-line order).  packs stays a plain list of strings, so existing
+    readers are unchanged.  The leading one-line pack note (recommended) is
+    pinned here too."""
+
+    CSV = b"zip\n1500001\n"
+
+    def test_pack_info_shape_version_source_sha(self):
+        with tempfile.TemporaryDirectory() as d:
+            pack = _write(d, "mypack.json", json.dumps(
+                {"schema": 1, "id": "mypack", "version": "0.1.0", "rules": [
+                    {"id": "r", "when": {"column_names": ["__none__"]}}]}).encode())
+            src = _write(d, "in.csv", self.CSV)
+            fj = _write(d, "f.json", b"")
+            call("inspect", src, "--hint-pack", pack, "--findings-json", fj)
+            f = json.load(open(fj))
+            info = f["pack_info"]
+            self.assertEqual([p["id"] for p in info], ["jp-basic", "mypack"])  # load order
+            b = info[0]
+            self.assertEqual(b["source"], "builtin")
+            self.assertEqual(b["version"], "1.0.0")
+            self.assertEqual(set(b), {"id", "version", "source", "sha256"})
+            m = info[1]
+            self.assertEqual(m["source"], "file")
+            self.assertEqual(m["version"], "0.1.0")
+            self.assertEqual(m["sha256"], hashlib.sha256(open(pack, "rb").read()).hexdigest())
+
+    def test_pack_info_stable_across_runs_and_packs_unchanged(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            fj1 = _write(d, "f1.json", b"")
+            fj2 = _write(d, "f2.json", b"")
+            call("inspect", src, "--findings-json", fj1)
+            call("inspect", src, "--findings-json", fj2)
+            f1, f2 = json.load(open(fj1)), json.load(open(fj2))
+            self.assertEqual(f1["pack_info"], f2["pack_info"])   # same input -> same bytes
+            self.assertEqual(f1["packs"], ["jp-basic"])          # packs stays a string list
+
+    def test_leading_pack_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            rc, out, _ = call("inspect", src)
+            self.assertEqual(rc, 0)
+            self.assertTrue(out.startswith("hint packs: jp-basic (builtin)\n"))
+            rc, out, _ = call("inspect", src, "--lang", "ja")
+            self.assertTrue(out.startswith("ヒントパック: jp-basic (内蔵)\n"))
+            # --no-builtin-hints and no pack: no pack line (v0.4.0 output)
+            rc, out, err = call("inspect", src, "--no-builtin-hints")
+            self.assertNotIn("hint packs:", out)
+            self.assertNotIn("ヒントパック:", out)
+
+
+class T19SentinelsAndPins(unittest.TestCase):
+    """T19 (v0.5.1): no cell value (sentinel) appears anywhere in the new
+    outputs (findings, warning lines, candidate/leak lines, pack line, template),
+    and the run pins (RUN_TABLE_SHA, run-never-imports-hintpack) are unchanged."""
+
+    SENTINELS = ("03-1234-5678", "0312345678", "4242-4242-4242-4242",
+                 "4242424242424242", "123456789018", "a@example.co.jp")
+    CSV = ("memo,secret,age\n"
+           "call 03-1234-5678 please,03-1234-5678,40\n"
+           "card 4242-4242-4242-4242,123456789018,41\n"
+           "mail a@example.co.jp,x,42\n").encode()
+    CFG = json.dumps({"k": 2, "columns": {
+        "memo": {"role": "keep"},
+        "secret": {"role": "id", "action": "drop"},
+        "age": {"role": "qi", "type": "numeric", "widths": [5, 10]}}}).encode()
+
+    def _sentinel_free(self, *texts):
+        for s in self.SENTINELS:
+            for t in texts:
+                self.assertNotIn(s, t, s)
+
+    def test_no_cell_values_in_any_new_output(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            cfg = _write(d, "c.json", self.CFG)
+            fj = _write(d, "f.json", b"")
+            rc, out, err = call("plan", src, "-c", cfg, "--findings-json", fj)
+            self.assertEqual(rc, 0)
+            self._sentinel_free(out, err, open(fj).read())
+            # inspect too: stdout, stderr, findings, and the template
+            # (the template path must NOT pre-exist: --config-out refuses existing files)
+            tpl = os.path.join(d, "t.json")
+            rc, out, err = call("inspect", src, "--config-out", tpl, "--findings-json", fj)
+            self.assertEqual(rc, 0)
+            self._sentinel_free(out, err, open(fj).read(), open(tpl).read())
+
+    def test_run_table_and_import_block_unchanged(self):
+        # explicit re-pin of T1 for v0.5.1 (run is untouched by A/B/C/D)
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "out.csv")
+            rc, _, _ = call("run", os.path.join(REPO, "examples", "people.csv"),
+                            "-c", os.path.join(REPO, "examples", "config.json"),
+                            "-o", out, "--quiet")
+            self.assertEqual(rc, 0)
+            with open(out, "rb") as fh:
+                self.assertEqual(hashlib.sha256(fh.read()).hexdigest(), RUN_TABLE_SHA)
+        import subprocess
+        people = os.path.join(REPO, "examples", "people.csv")
+        config = os.path.join(REPO, "examples", "config.json")
+        code = (
+            "import sys, os, tempfile; "
+            "from sieve_crowd.cli import main; "
+            "d = tempfile.mkdtemp(); o = os.path.join(d, 'o.csv'); "
+            "main(['run', %r, '-c', %r, '-o', o, '--quiet']); "
+            "print('HINTPACK_IMPORTED' if 'sieve_crowd.hintpack' in sys.modules else 'OK')"
+        ) % (people, config)
+        out = subprocess.check_output([sys.executable, "-c", code], text=True)
+        self.assertIn("OK", out)
+        self.assertNotIn("HINTPACK_IMPORTED", out)
+
+
 if __name__ == "__main__":
     unittest.main()

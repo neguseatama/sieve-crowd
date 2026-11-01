@@ -25,10 +25,11 @@ order: name+value → value → name → stat.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping, Optional, Sequence
 
 from .model import ConfigError
@@ -212,6 +213,9 @@ class Rule:
 class Pack:
     id: str
     rules: tuple[Rule, ...]
+    version: Optional[str] = None   # optional "version" field of the pack JSON
+    sha256: str = ""                # sha256 of the loaded bytes (file or builtin constant)
+    source: str = "file"            # "builtin" or "file"
 
 
 def _norm_name(name: str) -> str:
@@ -262,6 +266,11 @@ def _parse_pack(raw: Mapping[str, Any]) -> Pack:
     pid = raw.get("id")
     if not isinstance(pid, str) or not pid or len(pid) > MAX_NAME_CHARS:
         raise ConfigError("hint pack: needs a non-empty string 'id'")
+    version = raw.get("version")
+    if version is not None and (
+            not isinstance(version, str) or not version or len(version) > MAX_NAME_CHARS):
+        raise ConfigError(
+            f"pack {pid!r}: 'version' must be a non-empty string of at most {MAX_NAME_CHARS} chars")
     rules_raw = raw.get("rules")
     if not isinstance(rules_raw, list) or not rules_raw:
         raise ConfigError(f"pack {pid!r}: 'rules' must be a non-empty list")
@@ -275,10 +284,10 @@ def _parse_pack(raw: Mapping[str, Any]) -> Pack:
             raise ConfigError(f"pack {pid!r}: duplicate rule id {rule.id!r}")
         seen.add(rule.id)
         rules.append(rule)
-    return Pack(pid, tuple(rules))
+    return Pack(pid, tuple(rules), version)
 
 
-def load_pack_bytes(data: bytes, *, source: str = "<pack>") -> Pack:
+def load_pack_bytes(data: bytes, *, source: str = "<pack>", origin: str = "file") -> Pack:
     if len(data) > MAX_PACK_BYTES:
         raise ConfigError(f"hint pack {source}: larger than {MAX_PACK_BYTES} bytes (ceiling)")
     try:
@@ -289,7 +298,9 @@ def load_pack_bytes(data: bytes, *, source: str = "<pack>") -> Pack:
         raise ConfigError(f"hint pack {source}: not valid JSON ({exc.msg})") from None
     if not isinstance(raw, Mapping):
         raise ConfigError(f"hint pack {source}: the top level must be a JSON object")
-    return _parse_pack(raw)
+    pack = _parse_pack(raw)
+    # D: sha256 of the exact bytes loaded (a file, or the builtin string constant)
+    return replace(pack, sha256=hashlib.sha256(data).hexdigest(), source=origin)
 
 
 def load_packs(paths: Sequence[str], *, include_builtin: bool) -> list[Pack]:
@@ -306,7 +317,7 @@ def load_packs(paths: Sequence[str], *, include_builtin: bool) -> list[Pack]:
     rule_owner: dict[str, str] = {}   # rule id -> pack id that claimed it first
     if include_builtin:
         from .hintpack_builtin import BUILTIN_PACK_BYTES
-        pack = load_pack_bytes(BUILTIN_PACK_BYTES, source="<jp-basic>")
+        pack = load_pack_bytes(BUILTIN_PACK_BYTES, source="<jp-basic>", origin="builtin")
         packs.append(pack)
         pack_owner[pack.id] = "the built-in pack"
         for r in pack.rules:
@@ -361,6 +372,7 @@ class ColumnFindings:
 @dataclass
 class Findings:
     packs: list[str]
+    pack_info: list[dict]             # D: {id, version, source, sha256} per pack, load order
     columns: dict[str, ColumnFindings]
     warnings: list[dict]
     template_extras: dict[str, dict]   # col -> {"_suggest": {...}, "_candidates": [...]}
@@ -383,7 +395,8 @@ class Findings:
             if cf.leaks:
                 entry["leaks"] = cf.leaks
             cols[col] = entry
-        return {"packs": self.packs, "columns": cols, "warnings": self.warnings}
+        return {"packs": self.packs, "pack_info": self.pack_info,
+                "columns": cols, "warnings": self.warnings}
 
     def warning_lines(self, lang: str) -> list[str]:
         if not self.warnings:
@@ -557,4 +570,7 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
                                      "evidence": cand["evidence"]})
                     break
 
-    return Findings(packs_list, cols, warnings, extras)
+    return Findings(packs_list,
+                    [{"id": p.id, "version": p.version, "source": p.source, "sha256": p.sha256}
+                     for p in packs],
+                    cols, warnings, extras)

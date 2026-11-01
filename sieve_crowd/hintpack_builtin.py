@@ -37,6 +37,7 @@ assert len(_PREF_TO_REGION) == 47
 _PACK = {
     "schema": 1,
     "id": "jp-basic",
+    "version": "1.0.0",
     "_comment": (
         "Built-in hints for common Japanese columns. Region classification "
         "follows the 総務省/e-Stat eight-block 地方ブロック grouping: 三重=近畿, "
