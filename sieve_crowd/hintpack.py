@@ -379,6 +379,7 @@ class Findings:
     columns: dict[str, ColumnFindings]
     warnings: list[dict]
     template_extras: dict[str, dict]   # col -> {"_suggest": {...}, "_candidates": [...]}
+    derived_summary: Optional[dict] = None   # v0.6.0, plan only: the derived keep-vs-qi class counts
 
     def to_json(self) -> str:
         return json.dumps(self._as_obj(), ensure_ascii=False, indent=2, sort_keys=True)
@@ -398,56 +399,87 @@ class Findings:
             if cf.leaks:
                 entry["leaks"] = cf.leaks
             cols[col] = entry
-        return {"packs": self.packs, "pack_info": self.pack_info,
-                "columns": cols, "warnings": self.warnings}
+        obj = {"packs": self.packs, "pack_info": self.pack_info,
+               "columns": cols, "warnings": self.warnings}
+        if self.derived_summary is not None:      # key addition only (v0.6.0)
+            obj["derived_summary"] = self.derived_summary
+        return obj
 
     def warning_lines(self, lang: str) -> list[str]:
+        """stderr lines (v0.5.1 format).  Pack findings carry the heading; the
+        derived lines (v0.6.0) follow right after them without one."""
         if not self.warnings:
             return []
         ja = lang == "ja"
         head = "ヒントパックの所見:" if ja else "Hint pack findings:"
-        lines = [head]
+        pack_lines: list[str] = []
+        derived_lines: list[str] = []
         for w in self.warnings:
             code = w["code"]
-            if code == "role_mismatch":
+            if code == "derived":
+                if w["relation"] == "reveals_qi":
+                    if ja:
+                        derived_lines.append(
+                            f"  - derived: 「{w['column']}」（宣言 {w['declared_role']}）から"
+                            f"準識別子「{w['qi_column']}」がほぼ推定できます: "
+                            f"支持 {w['support']} 件、違反 {w['violations']} 件")
+                    else:
+                        derived_lines.append(
+                            f"  - derived: \"{w['column']}\" (declared {w['declared_role']}) "
+                            f"reveals qi \"{w['qi_column']}\": "
+                            f"support {w['support']}, violations {w['violations']}")
+                else:
+                    if ja:
+                        derived_lines.append(
+                            f"  - derived: 準識別子「{w['qi_column']}」から"
+                            f"「{w['column']}」（宣言 {w['declared_role']}）がほぼ推定できます: "
+                            f"支持 {w['support']} 件、違反 {w['violations']} 件")
+                    else:
+                        derived_lines.append(
+                            f"  - derived: \"{w['column']}\" (declared {w['declared_role']}) "
+                            f"is implied by qi \"{w['qi_column']}\": "
+                            f"support {w['support']}, violations {w['violations']}")
+            elif code == "role_mismatch":
                 if ja:
-                    lines.append(
+                    pack_lines.append(
                         f"  - role_mismatch: 「{w['column']}」は {w['suggested']} を提案しますが、"
                         f"設定では {w['declared']} として宣言されています（根拠: {w['evidence']}）")
                 else:
-                    lines.append(
+                    pack_lines.append(
                         f"  - role_mismatch: \"{w['column']}\" suggests {w['suggested']} "
                         f"but is declared {w['declared']} (evidence: {w['evidence']})")
             elif code == "mixed_form":
                 if ja:
-                    lines.append(
+                    pack_lines.append(
                         f"  - mixed_form: 「{w['column']}」に全角・半角が混在する値が "
                         f"{w['mixed_values']} 件あります（NFC では別の群れになります）")
                 else:
-                    lines.append(
+                    pack_lines.append(
                         f"  - mixed_form: \"{w['column']}\" has {w['mixed_values']} value(s) "
                         f"mixing full/half-width forms (NFC keeps them as separate crowds)")
             elif code == "japanese_era":
                 if ja:
-                    lines.append(
+                    pack_lines.append(
                         f"  - japanese_era: 「{w['column']}」に和暦形式の値が {w['count']} 件あります"
                         f"（西暦への統一を推奨）")
                 else:
-                    lines.append(
+                    pack_lines.append(
                         f"  - japanese_era: \"{w['column']}\" has {w['count']} value(s) in a "
                         f"Japanese-era form (prefer ISO dates)")
             elif code == "leak":
                 if ja:
-                    lines.append(
+                    pack_lines.append(
                         f"  - leak: 「{w['column']}」（宣言 {w['declared_role']}）: "
                         f"空でない {w['checked']} 件のうち {w['count']} 件に "
                         f"{w['pack']}/{w['rule']} が含まれる可能性があります")
                 else:
-                    lines.append(
+                    pack_lines.append(
                         f"  - leak: \"{w['column']}\" (declared {w['declared_role']}): "
                         f"{w['count']} of {w['checked']} non-empty cells may contain "
                         f"{w['pack']}/{w['rule']}")
-        return lines
+        if pack_lines:
+            return [head] + pack_lines + derived_lines
+        return derived_lines
 
 
 _EVIDENCE_ORDER = {"name+value": 0, "value": 1, "name": 2, "stat": 3}

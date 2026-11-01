@@ -109,8 +109,11 @@ def _parser() -> argparse.ArgumentParser:
                     help="load a hint pack (inspect/plan only; may be given more than once)")
     pl.add_argument("--no-builtin-hints", action="store_true",
                     help="exclude the built-in jp-basic pack (load --hint-pack files only)")
+    pl.add_argument("--no-derived", action="store_true",
+                    help="skip the derived keep-vs-qi relation report (on by default)")
     pl.add_argument("--findings-json", metavar="FILE",
-                    help="write the hint-pack findings (aggregates only, never cell values) as JSON")
+                    help="write the hint-pack and derived findings (aggregates only, "
+                         "never cell values) as JSON")
     return p
 
 
@@ -355,13 +358,23 @@ def _cmd_plan(a: argparse.Namespace) -> int:
         report = Report(plan_table(header, rows, cfg))
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    roles = {n: spec.role.value for n, spec in cfg.columns.items()}
     findings = None
     if packs:
         from .hintpack import scan as _scan
-        cfg_roles = {n: spec.role.value for n, spec in cfg.columns.items()}
-        findings = _scan(header, rows, report.data["columns"], packs, cfg_roles=cfg_roles)
+        findings = _scan(header, rows, report.data["columns"], packs, cfg_roles=roles)
+    if not a.no_derived:
+        # v0.6.0: the derived keep-vs-qi report runs on plan with or without
+        # packs (function-level import: run never pulls this module in).
+        from .derived import analyze as _analyze
+        derived_warnings, derived_summary = _analyze(header, rows, roles)
+        if findings is None:
+            from .hintpack import Findings
+            findings = Findings([], [], {}, [], {})
+        findings.warnings.extend(derived_warnings)
+        findings.derived_summary = derived_summary
     if not a.quiet:
-        if findings:
+        if findings and findings.pack_info:
             print(_packs_line(findings.pack_info, cfg.lang == "ja"), file=sys.stderr)
         print(report.text(cfg.lang), file=sys.stderr)
         if findings:
