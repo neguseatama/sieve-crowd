@@ -1,21 +1,32 @@
-"""Municipality pack generator tests (T27-T28, v0.6.0).
+"""Municipality pack generator tests (T27-T28, v0.6.0; T29, v0.6.1).
 
-``tools/make_municipality_pack.py`` turns the 総務省 local-government code
-list (a CSV with the columns 団体コード / 都道府県名 / 市区町村名) into the
-``jp-municipality-2026`` hint pack.  The tool is standard-library only,
+``tools/make_municipality_pack.py`` turns a Japanese local-government code
+CSV into the ``jp-municipality-2026`` hint pack.  Two input contracts are
+auto-detected from the header: the prefecture master of the デジタル庁
+アドレス・ベース・レジストリ (columns ``lg_code`` / ``pref`` — the source of
+the pack committed under ``packs/``, licensed under PDL 1.0 with the
+attribution in ``packs/README.md``) and the 総務省 local-government code list
+(columns ``団体コード`` / ``都道府県名`` / ``市区町村名`` — terms not
+confirmed, such a pack stays local).  The tool is standard-library only,
 deterministic (same input -> byte-identical pack), and its error messages
 name columns, row numbers and counts — never a cell value.
 
-T27 pins the generated pack (deterministic bytes, validity, uniqueness, the
-5-digit = first-5-of-6 relationship, no id clash with the builtin, suggests
-that pass ``parse_config``); T28 pins the input checks (exit code 2 without
-cell values).  The pack itself is NOT distributed: the generator and these
-tests are (see packs/README.md).  The classes skip when the tool is absent
-(an sdist ships the tests but not ``tools/``; from a repository checkout they
-always run).
+T27 pins the generated municipality-mode pack (deterministic bytes,
+validity, uniqueness, the 5-digit = first-5-of-6 relationship, no id clash
+with the builtin, suggests that pass ``parse_config``); T28 pins the input
+checks (exit code 2 without cell values).  T29 (v0.6.1) pins the prefecture
+mode (rules, the prefecture-level ``000`` guard, the ambiguous header), the
+committed pack (regenerating from the committed extract reproduces the
+committed bytes; the pack content: 47 codes / 47 code5 / 47 names, all
+prefecture-level) and the PDL 1.0 attribution in ``packs/README.md``.
 
-Test-number note: the request named these T25/T26; the block was shifted to
-T27/T28 because T20/T21 were already taken by v0.5.2.
+The classes skip when the tool or the ``packs/`` files are absent (an sdist
+ships the tests but neither ``tools/`` nor ``packs/``; from a repository
+checkout they always run).
+
+Test-number note: the v0.6.0 request named its block T25/T26; it was shifted
+to T27/T28 because T20/T21 were already taken by v0.5.2.  T29 continues the
+sequence in v0.6.1.
 """
 import json
 import os
@@ -209,6 +220,130 @@ class T28MunicipalityToolInputChecks(unittest.TestCase):
         r = _run([os.path.join(tempfile.gettempdir(), "sieve-crowd-missing-input.csv")])
         self.assertEqual(r.returncode, 1)
         self.assertIn("cannot read the input", r.stderr.decode())
+
+
+PREF_HEADER = "lg_code,pref,pref_kana,pref_roma,efct_date,ablt_date,remarks"
+PREF_ROWS = [
+    ("010006", "北海道", "ホッカイドウ", "Hokkaido", "1947-04-17", "", ""),
+    ("110001", "埼玉県", "サイタマケン", "Saitama", "1947-04-17", "", ""),
+    ("470007", "沖縄県", "オキナワケン", "Okinawa", "1947-04-17", "", ""),
+]
+PREF_CSV_SOURCE = REPO / "packs" / "mt_pref_all.csv"
+PREF_PACK = REPO / "packs" / "jp-municipality-2026.json"
+PACKS_README = REPO / "packs" / "README.md"
+
+
+def _pref_csv(rows=PREF_ROWS, header=PREF_HEADER) -> bytes:
+    return (header + "\n" + "".join(",".join(r) + "\n" for r in rows)).encode("utf-8")
+
+
+@unittest.skipUnless(TOOL.exists(),
+                     "the generator ships with the repository, not the sdist")
+class T29PrefectureModeAndCommittedPack(unittest.TestCase):
+    """T29 (v0.6.1): the prefecture mode (lg_code/pref), the committed pack
+    (byte-identity with a regeneration from the committed extract) and the
+    PDL 1.0 attribution in packs/README.md."""
+
+    @unittest.skipUnless(TOOL.exists(),
+                         "the generator ships with the repository, not the sdist")
+    def test_prefecture_mode_generates_the_prefecture_rules(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = _run([_write(d, "in.csv", _pref_csv())])
+            self.assertEqual(r.returncode, 0, r.stderr)
+        pack = load_pack_bytes(r.stdout, source="<generated>", origin="file")
+        self.assertEqual(pack.id, "jp-municipality-2026")
+        self.assertEqual(pack.version, "1.0.0")
+        self.assertEqual([rule.id for rule in pack.rules],
+                         ["jp-municipality-code", "jp-municipality-code5",
+                          "jp-prefecture-name"])
+        rules = {rule.id: rule for rule in pack.rules}
+        self.assertIn("lg_code", rules["jp-municipality-code"].column_names)
+        self.assertIn("都道府県コード", rules["jp-municipality-code"].column_names)
+        self.assertIn("pref", rules["jp-prefecture-name"].column_names)
+        codes = sorted(rules["jp-municipality-code"].check.values)
+        code5 = sorted(rules["jp-municipality-code5"].check.values)
+        names = sorted(rules["jp-prefecture-name"].check.values)
+        self.assertEqual(codes, sorted(c for c, *_ in PREF_ROWS))
+        self.assertEqual(code5, sorted(c[:5] for c, *_ in PREF_ROWS))
+        self.assertEqual(names, sorted({row[1] for row in PREF_ROWS}))
+        self.assertEqual(rules["jp-prefecture-name"].suggest,
+                         {"role": "qi", "type": "category"})
+
+    @unittest.skipUnless(TOOL.exists(),
+                         "the generator ships with the repository, not the sdist")
+    def test_prefecture_mode_rejects_municipality_level_code(self):
+        rows = [("011002", "北海道", "ホッカイドウ", "Hokkaido", "1947-04-17", "", "")]
+        with tempfile.TemporaryDirectory() as d:
+            r = _run([_write(d, "in.csv", _pref_csv(rows=rows))])
+        self.assertEqual(r.returncode, 2)
+        err = r.stderr.decode()
+        self.assertIn("lg_code: expected a prefecture-level code", err)
+        self.assertIn("(row 2)", err)
+        self.assertNotIn("011002", err)
+
+    @unittest.skipUnless(TOOL.exists(),
+                         "the generator ships with the repository, not the sdist")
+    def test_ambiguous_header_exits_2(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = _run([_write(d, "in.csv", _pref_csv(
+                header="lg_code,団体コード,都道府県名,市区町村名,pref",
+                rows=[("010006", "010006", "北海道", "哨兵市", "北海道")]))])
+        self.assertEqual(r.returncode, 2)
+        err = r.stderr.decode()
+        self.assertIn("ambiguous input", err)
+        self.assertIn("found: lg_code, 団体コード, 都道府県名, 市区町村名, pref", err)
+        self.assertNotIn("010006", err)
+
+    @unittest.skipUnless(TOOL.exists() and PREF_CSV_SOURCE.exists()
+                         and PREF_PACK.exists(),
+                         "the generator and the committed packs/ files ship "
+                         "with the repository, not the sdist")
+    def test_committed_pack_matches_regeneration(self):
+        r = _run([str(PREF_CSV_SOURCE)])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(PREF_PACK, "rb") as fh:
+            committed = fh.read()
+        self.assertEqual(committed, r.stdout)      # byte-identical regeneration
+
+    @unittest.skipUnless(PREF_PACK.exists(),
+                         "the committed pack ships with the repository, not the sdist")
+    def test_committed_pack_pins_the_prefecture_edition(self):
+        with open(PREF_PACK, "rb") as fh:
+            pack = load_pack_bytes(fh.read(), source="<committed>", origin="file")
+        self.assertEqual(pack.id, "jp-municipality-2026")
+        self.assertEqual(pack.version, "1.0.0")
+        self.assertEqual([rule.id for rule in pack.rules],
+                         ["jp-municipality-code", "jp-municipality-code5",
+                          "jp-prefecture-name"])
+        rules = {rule.id: rule for rule in pack.rules}
+        codes = sorted(rules["jp-municipality-code"].check.values)
+        code5 = sorted(rules["jp-municipality-code5"].check.values)
+        names = sorted(rules["jp-prefecture-name"].check.values)
+        self.assertEqual(len(codes), 47)                       # 47 prefectures
+        self.assertEqual(len(set(codes)), len(codes))          # unique
+        self.assertTrue(all(len(c) == 6 and c.isdigit() for c in codes))
+        self.assertTrue(all(1 <= int(c[:2]) <= 47 for c in codes))   # 01..47
+        self.assertEqual(len(code5), 47)
+        self.assertTrue(all(c.endswith("000") for c in code5))       # prefecture level
+        self.assertEqual(len(names), 47)
+        self.assertEqual(len(set(names)), len(names))
+        for rule in pack.rules:          # every suggest passes parse_config
+            spec = {k: v for k, v in rule.suggest.items() if k != "role"}
+            cfg = parse_config({"k": 2, "columns": {
+                "dummy": {"role": "qi", **spec}}})
+            self.assertEqual(cfg.names(cfg.columns["dummy"].role), ["dummy"])
+
+    @unittest.skipUnless(PACKS_README.exists(),
+                         "packs/README.md ships with the repository, not the sdist")
+    def test_packs_readme_carries_the_required_attribution(self):
+        text = PACKS_README.read_text(encoding="utf-8")
+        for needle in (
+                "base_registry_address",          # 出典 URL (アドレス・ベース・レジストリ)
+                "public_data_license_v1.0",       # PDL 1.0 license URL
+                "PDL 1.0",                        # the license name
+                "加工・作成",                       # the edited-data statement (1.1)
+                "sieve-crowd"):                   # the entity that edited it
+            self.assertIn(needle, text)
 
 
 if __name__ == "__main__":
