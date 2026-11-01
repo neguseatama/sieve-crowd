@@ -480,17 +480,36 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
         leak_target = cfg_roles is None or cfg_roles.get(name) in ("keep", "sensitive", "qi")
         if leak_target and cfg_roles is not None:
             cf.declared_role = cfg_roles.get(name)
-        cell_tokens = [None if len(v) > MAX_CELL_CHARS else tuple(_TOKENS.findall(v))
-                       for v in nonempty] if leak_target else ()
+        # a plain-digit cell is its own single token (skips the regex scan);
+        # oversized cells are skipped regardless of shape
+        cell_tokens = [
+            None if len(v) > MAX_CELL_CHARS
+            else (v,) if (v.isascii() and v.isdigit())
+            else tuple(_TOKENS.findall(v))
+            for v in nonempty
+        ] if leak_target else ()
+        if leak_target:
+            uniq_tokens = {t for tokens in cell_tokens if tokens for t in tokens}
+            n_checked = sum(1 for t in cell_tokens if t is not None)
+            n_skipped = len(nonempty) - n_checked
 
         best: Optional[tuple[int, Rule]] = None      # (evidence rank, rule) for _suggest
         for pack in packs:
             for rule in pack.rules:
                 name_match = bool(rule.column_names) and norm_name in rule.column_names
-                shape_match = rule.shape is not None and any(
-                    rule.shape.match(v) for v in nonempty)    # type: ignore[union-attr]
-                check_match = rule.check is not None and any(
-                    _eval_check(rule.check, v) == "match" for v in nonempty)   # type: ignore[union-attr]
+                # The whole-column value signals feed the evidence rank, the
+                # checks record and the candidates — never the leak counts
+                # (the token scan below does that).  A leak rule whose name
+                # does not match therefore skips the whole-column scan on this
+                # column: its job here is the token scan only, and the checks
+                # record keeps its v0.5.0 condition (a signal must exist).
+                if name_match or not rule.leak:
+                    shape_match = rule.shape is not None and any(
+                        rule.shape.match(v) for v in nonempty)    # type: ignore[union-attr]
+                    check_match = rule.check is not None and any(
+                        _eval_check(rule.check, v) == "match" for v in nonempty)   # type: ignore[union-attr]
+                else:
+                    shape_match = check_match = False
                 value_signal = shape_match or check_match
                 # B: a leak rule is evaluated on every scanned column regardless
                 # of name/value signals — prose-embedded identifiers must be
@@ -504,8 +523,9 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
                 else:
                     evi = "name"
 
-                # check aggregates (three-valued)
-                if rule.check is not None:
+                # check aggregates (three-valued; unchanged v0.5.0 condition:
+                # the column must show a name or value signal for the rule)
+                if rule.check is not None and (name_match or value_signal):
                     agg = {"match": 0, "mismatch": 0, "cannot_check": 0}
                     for v in values:
                         agg[_eval_check(rule.check, v)] += 1
@@ -514,26 +534,27 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
 
                 # leak count (B): values that look like a direct identifier are
                 # matched as prose tokens (see _token_matches); cells over
-                # MAX_CELL_CHARS are skipped and counted as skipped.  No value
-                # is emitted, only the counts.  On plan a count >= 1 also adds a
-                # warnings element (code leak) so the stderr line appears.
+                # MAX_CELL_CHARS are skipped and counted as skipped.  The
+                # distinct tokens are matched once per column, then the cells
+                # that carry one are counted — the same counts as matching
+                # cell by cell, without re-matching repeated values.  No value
+                # is emitted, only the counts.  On plan a count >= 1 also adds
+                # a warnings element (code leak) so the stderr line appears.
                 if rule.leak and leak_target:
-                    count = checked = 0
-                    for tokens in cell_tokens:
-                        if tokens is None:
-                            continue
-                        checked += 1
-                        if any(_token_matches(rule, t) for t in tokens):
-                            count += 1
-                    skipped = len(nonempty) - checked
-                    if count or skipped:
+                    matched = {t for t in uniq_tokens if _token_matches(rule, t)}
+                    count = 0
+                    if matched:
+                        for tokens in cell_tokens:
+                            if tokens is not None and any(t in matched for t in tokens):
+                                count += 1
+                    if count or n_skipped:
                         cf.leaks.append({"pack": pack.id, "rule": rule.id, "count": count,
-                                         "checked": checked, "skipped": skipped})
+                                         "checked": n_checked, "skipped": n_skipped})
                         if count and cfg_roles is not None:
                             warnings.append({"code": "leak", "column": name,
                                              "declared_role": cf.declared_role,
                                              "pack": pack.id, "rule": rule.id,
-                                             "count": count, "checked": checked})
+                                             "count": count, "checked": n_checked})
 
                 # candidate for the template
                 if rule.suggest is not None:

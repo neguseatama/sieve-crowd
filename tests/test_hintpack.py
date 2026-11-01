@@ -558,7 +558,8 @@ class T16SubstringScan(unittest.TestCase):
             self.assertEqual(rc, 0, err)
             with open(fj) as fh:
                 f = json.load(fh)
-            return f["columns"]["memo"].get("leaks", [])
+            # a column with nothing found (no candidates/checks/leaks) may be absent
+            return f["columns"].get("memo", {}).get("leaks", [])
 
     def test_numbers_inside_prose_are_detected(self):
         rules = {l["rule"]: l["count"] for l in self._leaks_for(self.PROSE)}
