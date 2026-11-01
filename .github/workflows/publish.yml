@@ -1,0 +1,70 @@
+name: publish
+
+# Publishes a release to PyPI with Trusted Publishing (OIDC; no token stored).
+# The git tag must equal "v" + the package version, and the full test suite
+# (the same one CI runs) must pass before anything is uploaded.
+#
+# Triggers:
+#   - pushing a tag "v*"
+#   - manual dispatch with an explicit tag (lets a tag that was created before
+#     this workflow existed — e.g. v0.5.2 — be published afterwards)
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.5.2)"
+        required: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # the only permission Trusted Publishing needs
+      id-token: write
+    steps:
+      - name: Resolve the ref to build
+        id: ref
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ref=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Gate — the full test suite (same command as test.yml)
+        run: python -m unittest discover -s tests
+
+      - name: The git tag must match the package version
+        run: |
+          ver=$(python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          tag="${{ steps.ref.outputs.tag }}"
+          echo "tag: $tag / package version: $ver"
+          if [ "$tag" != "v$ver" ]; then
+            echo "::error::tag $tag does not match package version $ver (expected v$ver)"
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          ls -la dist/
+
+      - name: Metadata check
+        run: python -m twine check dist/*
+
+      - name: Publish to PyPI (Trusted Publishing — no password, no token)
+        uses: pypa/gh-action-pypi-publish@release/v1
