@@ -783,5 +783,144 @@ class T19SentinelsAndPins(unittest.TestCase):
         self.assertNotIn("HINTPACK_IMPORTED", out)
 
 
+class T20CandidateOrder(unittest.TestCase):
+    """T20 (v0.5.2, item a): the candidate order is a contract, not load order
+    and not the order rules are written in a pack — evidence strength
+    (name+value → value → name → stat), then role (id → sensitive → qi, roles
+    outside this list last), then rule id ascending (plain string comparison).
+    _suggest follows the first sorted candidate.  findings.packs / pack_info
+    stay in load order (unchanged by design)."""
+
+    CSV = b"memo\n1234567\n"    # 7 digits — every rule below signals on this column
+
+    def _pack(self, d, name, pid, rules):
+        return _write(d, name, json.dumps({"schema": 1, "id": pid, "rules": rules}).encode())
+
+    def _probe(self, d, src, tag, packs):
+        """inspect with --no-builtin-hints; return (candidates, _suggest, packs)."""
+        fj = _write(d, f"f-{tag}.json", b"")
+        tpl = _write(d, f"t-{tag}.json", b"")
+        argv = ["inspect", src, "--no-builtin-hints", "--findings-json", fj,
+                "--config-out", tpl, "--force"]
+        for p in packs:
+            argv += ["--hint-pack", p]
+        rc, _, err = call(*argv)
+        self.assertEqual(rc, 0, err)
+        with open(fj) as fh:
+            f = json.load(fh)
+        with open(tpl) as fh:
+            t = json.load(fh)
+        cands = [(c["pack"], c["rule"], c["evidence"], c["suggest"]["role"])
+                 for c in f["columns"]["memo"]["candidates"]]
+        return cands, t["columns"]["memo"]["_suggest"], f["packs"]
+
+    def test_pack_rule_order_does_not_change_candidates(self):
+        # same evidence (name+value), roles differ: id wins over qi wherever written
+        rules = [
+            {"id": "r-a", "when": {"column_names": ["memo"], "value_shape": "#######"},
+             "suggest": {"role": "qi", "note": "A"}},
+            {"id": "r-b", "when": {"column_names": ["memo"], "value_shape": "#######"},
+             "suggest": {"role": "id", "note": "B"}},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            fwd = self._pack(d, "fwd.json", "p", rules)
+            rev = self._pack(d, "rev.json", "p", list(reversed(rules)))
+            c1, s1, _ = self._probe(d, src, "1f", [fwd])
+            c2, s2, _ = self._probe(d, src, "1r", [rev])
+            self.assertEqual(c1, [("p", "r-b", "name+value", "id"),
+                                  ("p", "r-a", "name+value", "qi")])
+            self.assertEqual(c1, c2)
+            self.assertEqual(s1, {"role": "id", "note": "B"})
+            self.assertEqual(s1, s2)
+
+    def test_rule_id_ascending_breaks_ties(self):
+        rules = [
+            {"id": "r-a2", "when": {"column_names": ["memo"], "value_shape": "#######"},
+             "suggest": {"role": "qi", "note": "A2"}},
+            {"id": "r-b2", "when": {"column_names": ["memo"], "value_shape": "#######"},
+             "suggest": {"role": "qi", "note": "B2"}},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            fwd = self._pack(d, "fwd.json", "p2", rules)
+            rev = self._pack(d, "rev.json", "p2", list(reversed(rules)))
+            c1, s1, _ = self._probe(d, src, "2f", [fwd])
+            c2, s2, _ = self._probe(d, src, "2r", [rev])
+            self.assertEqual(c1, [("p2", "r-a2", "name+value", "qi"),
+                                  ("p2", "r-b2", "name+value", "qi")])
+            self.assertEqual(c1, c2)
+            self.assertEqual(s1, {"role": "qi", "note": "A2"})
+            self.assertEqual(s1, s2)
+
+    def test_pack_load_order_does_not_change_candidates(self):
+        rules_x = [{"id": "x", "when": {"column_names": ["memo"], "value_shape": "#######"},
+                    "suggest": {"role": "qi", "note": "X"}}]
+        rules_y = [{"id": "y", "when": {"column_names": ["memo"], "value_shape": "#######"},
+                    "suggest": {"role": "id", "note": "Y"}}]
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            px = self._pack(d, "px.json", "px", rules_x)
+            py = self._pack(d, "py.json", "py", rules_y)
+            c1, s1, p1 = self._probe(d, src, "3f", [px, py])
+            c2, s2, p2 = self._probe(d, src, "3r", [py, px])
+            self.assertEqual(c1, [("py", "y", "name+value", "id"),
+                                  ("px", "x", "name+value", "qi")])
+            self.assertEqual(c1, c2)
+            self.assertEqual(s1, {"role": "id", "note": "Y"})
+            self.assertEqual(s1, s2)
+            self.assertEqual(p1, ["px", "py"])        # findings.packs keeps load order
+            self.assertEqual(p2, ["py", "px"])
+
+    def test_role_order_id_sensitive_qi(self):
+        # rule ids ordered so the id-ascending tie-break alone cannot produce this
+        rules = [
+            {"id": "r1", "when": {"column_names": ["memo"], "value_shape": "#######"},
+             "suggest": {"role": "qi"}},
+            {"id": "r2", "when": {"column_names": ["memo"], "value_shape": "#######"},
+             "suggest": {"role": "sensitive"}},
+            {"id": "r3", "when": {"column_names": ["memo"], "value_shape": "#######"},
+             "suggest": {"role": "id"}},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            p = self._pack(d, "p.json", "p3", rules)
+            cands, sug, _ = self._probe(d, src, "4", [p])
+            self.assertEqual([c[1] for c in cands], ["r3", "r2", "r1"])
+            self.assertEqual(sug, {"role": "id"})
+
+    def test_unknown_role_sorts_after_qi(self):
+        rules = [
+            {"id": "r1", "when": {"column_names": ["memo"], "value_shape": "#######"},
+             "suggest": {"role": "keep"}},
+            {"id": "r2", "when": {"column_names": ["memo"], "value_shape": "#######"},
+             "suggest": {"role": "qi"}},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            p = self._pack(d, "p.json", "p4", rules)
+            cands, sug, _ = self._probe(d, src, "5", [p])
+            self.assertEqual([c[1] for c in cands], ["r2", "r1"])
+            self.assertEqual(sug, {"role": "qi"})
+
+    def test_evidence_strength_first(self):
+        rules = [
+            {"id": "r-name", "when": {"column_names": ["memo"]},
+             "suggest": {"role": "qi", "note": "N"}},
+            {"id": "r-value", "when": {"value_shape": "#######"},
+             "suggest": {"role": "qi", "note": "V"}},
+            {"id": "r-nv", "when": {"column_names": ["memo"], "value_shape": "#######"},
+             "suggest": {"role": "qi", "note": "NV"}},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            p = self._pack(d, "p.json", "p5", rules)
+            cands, sug, _ = self._probe(d, src, "6", [p])
+            self.assertEqual([(c[1], c[2]) for c in cands],
+                             [("r-nv", "name+value"), ("r-value", "value"),
+                              ("r-name", "name")])
+            self.assertEqual(sug, {"role": "qi", "note": "NV"})
+
+
 if __name__ == "__main__":
     unittest.main()
