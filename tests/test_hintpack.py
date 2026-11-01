@@ -21,7 +21,11 @@ from sieve_crowd.model import ConfigError
 
 # Golden sha256 captured from v0.4.0 (run path unchanged; T1 pins it).
 RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae040061500e"
+# v0.4.0 inspect template (--config-out without hint packs). Since v0.5.1 the
+# byte-exact route is reached with --no-builtin-hints (T4/T14); value unchanged.
 TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159"
+# New pin (v0.5.1): the default-on (builtin loaded) inspect template, people.csv.
+TEMPLATE_SHA2 = "06bb4afaad3b7d8d2967842e2a95a5ef6df3a5932a58f67fe9469ea199fbad7b"
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -115,11 +119,13 @@ class T3PackLoading(unittest.TestCase):
 
 
 class T4TemplateByteEquality(unittest.TestCase):
+    # v0.5.1: the default is builtin-on (A), so the v0.4.0 byte-exact template
+    # route is reached with --no-builtin-hints; the TEMPLATE_SHA value is unchanged.
     def test_template_without_pack_matches_golden(self):
         with tempfile.TemporaryDirectory() as d:
             tpl = os.path.join(d, "t.json")
             call("inspect", os.path.join(REPO, "examples", "people.csv"),
-                 "--config-out", tpl)
+                 "--config-out", tpl, "--no-builtin-hints")
             with open(tpl, "rb") as fh:
                 self.assertEqual(hashlib.sha256(fh.read()).hexdigest(), TEMPLATE_SHA)
 
@@ -396,6 +402,60 @@ class T13NoBuiltinAndDuplicates(unittest.TestCase):
             f = json.load(open(fj))
             # v0.5.1 load order: builtin first, then the command-line order (T18 pins pack_info likewise)
             self.assertEqual(f["packs"], ["jp-basic", "extra"])
+
+
+class T14DefaultOn(unittest.TestCase):
+    """A (v0.5.1): the builtin jp-basic pack is loaded by default on inspect/plan.
+    --no-builtin-hints keeps the byte-exact v0.4.0 route (TEMPLATE_SHA, value
+    unchanged); the default-on template has its own new pin (TEMPLATE_SHA2).
+    The leading pack line and pack_info are pinned in T18 (item D)."""
+
+    CSV = b"zip\n1500001\n"
+    CFG = json.dumps({"k": 2, "columns": {"zip": {"role": "qi", "type": "prefix", "length": 4}}}).encode()
+
+    def test_default_on_inspect_suggests_builtin(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            rc, out, _ = call("inspect", src)
+            self.assertEqual(rc, 0)
+            self.assertIn("hint-pack jp-basic/jp-zip", out)   # builtin candidate offered
+
+    def test_default_on_plan_reads_builtin(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            cfg = _write(d, "c.json", self.CFG)
+            fj = _write(d, "f.json", b"")
+            rc, _, err = call("plan", src, "-c", cfg, "--findings-json", fj, "--quiet")
+            self.assertEqual(rc, 0, err)
+            f = json.load(open(fj))
+            self.assertEqual(f["packs"], ["jp-basic"])        # builtin loaded without options
+            self.assertEqual(err, "")                          # quiet plan stays silent (no pack line)
+
+    def test_no_builtin_hints_template_still_golden(self):
+        with tempfile.TemporaryDirectory() as d:
+            tpl = os.path.join(d, "t.json")
+            call("inspect", os.path.join(REPO, "examples", "people.csv"),
+                 "--config-out", tpl, "--no-builtin-hints")
+            with open(tpl, "rb") as fh:
+                self.assertEqual(hashlib.sha256(fh.read()).hexdigest(), TEMPLATE_SHA)
+
+    def test_default_on_template_is_pinned(self):
+        with tempfile.TemporaryDirectory() as d:
+            tpl = os.path.join(d, "t.json")
+            call("inspect", os.path.join(REPO, "examples", "people.csv"), "--config-out", tpl)
+            with open(tpl, "rb") as fh:
+                self.assertEqual(hashlib.sha256(fh.read()).hexdigest(), TEMPLATE_SHA2)
+
+    def test_hint_pack_file_adds_to_builtin(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            pack = _write(d, "p.json", json.dumps(
+                {"schema": 1, "id": "p", "rules": [
+                    {"id": "r", "when": {"column_names": ["__none__"]}}]}).encode())
+            fj = _write(d, "f.json", b"")
+            call("inspect", src, "--hint-pack", pack, "--findings-json", fj)
+            f = json.load(open(fj))
+            self.assertEqual(f["packs"], ["jp-basic", "p"])   # builtin + the given pack
 
 
 class T17DuplicateIdsRefused(unittest.TestCase):

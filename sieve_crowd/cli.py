@@ -54,7 +54,7 @@ def _parser() -> argparse.ArgumentParser:
     i.add_argument("--hint-pack", metavar="FILE", action="append",
                    help="load a hint pack (inspect/plan only; may be given more than once)")
     i.add_argument("--no-builtin-hints", action="store_true",
-                   help="exclude the built-in jp-basic pack when --hint-pack is given")
+                   help="exclude the built-in jp-basic pack (load --hint-pack files only)")
     i.add_argument("--findings-json", metavar="FILE",
                    help="write the hint-pack findings (aggregates only, never cell values) as JSON")
 
@@ -108,7 +108,7 @@ def _parser() -> argparse.ArgumentParser:
     pl.add_argument("--hint-pack", metavar="FILE", action="append",
                     help="load a hint pack (inspect/plan only; may be given more than once)")
     pl.add_argument("--no-builtin-hints", action="store_true",
-                    help="exclude the built-in jp-basic pack when --hint-pack is given")
+                    help="exclude the built-in jp-basic pack (load --hint-pack files only)")
     pl.add_argument("--findings-json", metavar="FILE",
                     help="write the hint-pack findings (aggregates only, never cell values) as JSON")
     return p
@@ -224,17 +224,20 @@ def _load_config(a: argparse.Namespace):
 def _hint_packs(a: argparse.Namespace):
     """Load hint packs for inspect/plan, or an exit code on failure.
 
-    Returns an empty list when ``--hint-pack`` is not given, so the default
-    inspect/plan output stays byte-identical to v0.4.0 (the feature is opt-in).
-    The import of :mod:`sieve_crowd.hintpack` lives here, not at the top of the
-    module, so ``run`` never pulls it into its import closure.
+    Since v0.5.1 the builtin jp-basic pack is loaded by default (A);
+    ``--no-builtin-hints`` excludes it.  With no user pack and the builtin
+    excluded, nothing is loaded and the inspect/plan output stays byte-identical
+    to v0.4.0 (TEMPLATE_SHA route).  The import of :mod:`sieve_crowd.hintpack`
+    lives here, not at the top of the module, so ``run`` never pulls it into
+    its import closure.
     """
     paths = getattr(a, "hint_pack", None) or []
-    if not paths:
+    include_builtin = not getattr(a, "no_builtin_hints", False)
+    if not paths and not include_builtin:
         return []
     try:
         from .hintpack import load_packs
-        return load_packs(paths, include_builtin=not getattr(a, "no_builtin_hints", False))
+        return load_packs(paths, include_builtin=include_builtin)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_CONFIG
