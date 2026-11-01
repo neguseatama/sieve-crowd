@@ -1,6 +1,6 @@
 # Sieve Crowd — Specification
 
-Version 0.4.0. [日本語版](SPEC.ja.md)
+Version 0.5.0. [日本語版](SPEC.ja.md)
 
 Sieve Crowd turns a table about people (CSV, JSON or XML) into a table in which every record belongs to a **crowd**
 of at least *k* records that look alike on the columns an outsider could already know, and **measures the result on
@@ -207,6 +207,16 @@ only — the labels of individual crowds (which are derived from cell values) ar
   Python's `csv`; the JSON and XML adapters normalize to the same string table, so the engine is format-blind.
 * Indicative speed: 100,000 rows × 4 QIs in about 6 s on a laptop-class CPU.
 * Positions of randomness: only the shuffle uses a PRNG (SplitMix64, own implementation, portable).
+
+## 12. Hint packs (inspect/plan only)
+
+A hint pack is a JSON object (`schema: 1`, read as `utf-8-sig`) that suggests roles and checks value shapes for `inspect` and `plan`. It is **opt-in**: `run` never imports the hint-pack module, and without `--hint-pack` the inspect/plan output is byte-for-byte the v0.4.0 output.
+
+CLI (inspect/plan only): `--hint-pack FILE` (repeatable; duplicate pack ids are rejected; activates the built-in `jp-basic` unless `--no-builtin-hints` is given) and `--findings-json FILE` (the findings, written separately from `--report-json`).
+
+A pack lists rules. A rule's `when` matches a column by `column_names` (NFKC + lower-case — the old `hint()` comparison with NFKC added; the old `hint()` itself is unchanged) and/or `value_shape`. The shape language is bounded: `#` digit, `@` ASCII letter, `\X` literal, only `{m}` / `{m,n}` quantifiers; no alternation or nesting, so no catastrophic backtracking. A rule may carry a `check` (`set` / `range` / `luhn` / `my_number` / `email_shape`; each returns three values: match / mismatch / cannot-check, with official test vectors for Luhn and the My Number residue-11 check digit), a `leak` flag (counts identifier-shaped values, emitting no value), and a `suggest` (role + generalizer settings, written into the template under `_suggest` / `_candidates` for that column only). Evidence is reported in the order name+value → value → name.
+
+Findings carry aggregates and column names only — **never a cell value**. Three observation warnings are emitted when scanning: `role_mismatch` (a column suggested `qi` with name+value/value evidence but declared `keep` / `sensitive`), `mixed_form` (a column with values mixing full/half-width forms — NFC does not fold them, so they form separate crowds), and `japanese_era` (values in a 和暦 form). The built-in `jp-basic` pack covers postal codes (`prefix` length 4), phone / My Number / email / card leak checks, the 47 prefectures as a `category` hierarchy (one regional standard fixed in the pack: 三重 = 近畿, 新潟 = 中部), and ages.
 
 ## Appendix — design decisions taken autonomously
 

@@ -1,6 +1,6 @@
 # Sieve Crowd 仕様書
 
-バージョン0.4.0。[English](SPEC.md)
+バージョン0.5.0。[English](SPEC.md)
 
 Sieve Crowdは、人に関する表（CSV・JSON・XML）を、部外者がすでに知り得る列について少なくとも *k* 件が似通った**群れ**にすべてのレコードが属する表に変え、
 **できあがった表そのものを測定**します。オフライン、実行時の依存ゼロ、決定論的です。
@@ -188,6 +188,16 @@ JSON／XML に対して指定すると拒否されます。
   JSONとXMLのアダプタは同じ文字列の表に正規化するので、エンジンは形式を知りません。
 * 速度の目安：10万行×QI4列で、一般的なノートPCで約6秒。
 * 乱数を使うのはシャッフルだけで、SplitMix64（自前の実装、移植可能）を使います。
+
+## 12. ヒントパック（inspect/plan のみ）
+
+ヒントパックは `inspect` と `plan` のための JSON オブジェクト（`schema: 1`・`utf-8-sig` で読み込み）で、役割の提案と値の形の検査を行います。**オプトイン**です: `run` はヒントパックモジュールを import せず、`--hint-pack` を与えなければ inspect/plan の出力は v0.4.0 とバイト単位で同一です。
+
+コマンドライン（inspect/plan のみ）: `--hint-pack FILE`（複数指定可・重複 id は拒否・`--no-builtin-hints` がない限り組み込み `jp-basic` を併読）と `--findings-json FILE`（所見・`--report-json` とは別ファイル）。
+
+パックはルールのリストです。ルールの `when` は `column_names`（NFKC＋小文字化・旧 `hint()` の照合に NFKC を足したもの・旧 `hint()` 自体は不変）と/または `value_shape` で列を照合します。`value_shape` 言語は閉じた集合: `#` 数字・`@` 英字・`\X` 字面・量化子は `{m}`/`{m,n}` のみ（選択・入れ子なし・暴走なし）。ルールは `check`（`set`/`range`/`luhn`/`my_number`/`email_shape`・3 値: 一致/不一致/無法検査・Luhn とマイナンバーの検査数字は公式テストベクトル固定）、`leak`（識別子らしい値を件数のみで報告・値を出さない）、`suggest`（役割＋一般化器設定・その列だけ `_suggest`/`_candidates` に書き込まれる）を持ちます。証拠は name+value → value → name の順。
+
+所見は集計値と列名のみで、**セルの値は一切出ません**。走査時に 3 つの観測警告が出ます: `role_mismatch`（`qi` を提案された列が name+value/value 証拠で `keep`/`sensitive` 宣言されている）、`mixed_form`（全角・半角の混在・NFC は折りたたまないため別の群れになる）、`japanese_era`（和暦形式の値）。組み込み `jp-basic` は郵便番号（`prefix` length 4）、電話/マイナンバー/メール/カードの漏洩検査、47 都道府県の `category` 階層（パック内に地方区分の基準を 1 つ固定: 三重 = 近畿・新潟 = 中部）、年齢をカバーします。
 
 ## 付録　独自に決めたこと
 

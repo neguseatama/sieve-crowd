@@ -1,4 +1,4 @@
-# Sieve Crowd v0.4.0
+# Sieve Crowd v0.5.0
 
 English | [日本語](README.ja.md)
 
@@ -135,6 +135,25 @@ Takahashi Hina,1986-11-02,40,1500052,M,none     20-24,15100**,F,cold
 Kobayashi Haruto,2003-01-03,23,1000042,F,flu    20-24,16000**,M,none
 Yamamoto Aoi,1971-10-04,55,1510061,M,flu        55-59,15100**,M,asthma
 ```
+
+---
+
+## 🧪 Hint packs (opt-in)
+
+`inspect` and `plan` can load **hint packs** — JSON files that suggest a role and a generalizer for a column and check value shapes, without ever touching the anonymization. `run` never reads a pack: the feature is opt-in and the run path is byte-for-byte unchanged from v0.4.0.
+
+```bash
+sieve-crowd inspect people.csv --config-out config.json --hint-pack my.json
+sieve-crowd plan   people.csv -c config.json    --hint-pack my.json --findings-json findings.json
+```
+
+- `--hint-pack FILE` — load a pack (may be given more than once; duplicate pack ids are rejected). Activates the built-in `jp-basic` pack as well.
+- `--no-builtin-hints` — exclude `jp-basic` (use only the packs you named).
+- `--findings-json FILE` — write the findings as JSON: aggregates and column names only, **never a cell value**.
+
+A pack (`schema: 1`, read as `utf-8-sig`) lists rules. Each rule has a `when` (matching the column by `column_names` and/or `value_shape`), an optional `suggest` (role + generalizer settings, written into the template under `_suggest` for that column only), an optional `check` (`set` / `range` / `luhn` / `my_number` / `email_shape`, each three-valued: match / mismatch / cannot-check), and an optional `leak` flag (counts values that look like a direct identifier, emitting no value). The `value_shape` language is bounded on purpose: `#` one digit, `@` one ASCII letter, `\X` a literal escape, only `{m}` / `{m,n}` quantifiers — no alternation, no nesting, so it cannot describe a catastrophic-backtracking pattern.
+
+The built-in `jp-basic` pack covers Japanese postal codes (`prefix` length 4), phone / My Number / email / card-number leak checks (Luhn and the official My Number residue-11 check digit), the 47 prefectures as a `category` hierarchy mapped to the eight-block 地方ブロック grouping (三重 = 近畿, 新潟 = 中部 — one standard fixed inside the pack), plausible ages, and three observation warnings: `role_mismatch` (a column suggested `qi` but declared `keep` / `sensitive`), `mixed_form` (full/half-width forms mixed in a column — NFC keeps them as separate crowds), and `japanese_era` (values in a 和暦 form). Edit a pack to change a standard; hints never affect a run.
 
 ---
 

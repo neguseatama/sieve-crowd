@@ -1,4 +1,4 @@
-# Sieve Crowd v0.4.0
+# Sieve Crowd v0.5.0
 
 [English](README.md) | 日本語
 
@@ -135,6 +135,25 @@ Takahashi Hina,1986-11-02,40,1500052,M,none     20-24,15100**,F,cold
 Kobayashi Haruto,2003-01-03,23,1000042,F,flu    20-24,16000**,M,none
 Yamamoto Aoi,1971-10-04,55,1510061,M,flu        55-59,15100**,M,asthma
 ```
+
+---
+
+## 🧪 ヒントパック（オプトイン）
+
+`inspect` と `plan` は**ヒントパック**（JSON ファイル）を読み込めます。列への役割・一般化器の提案と値の形の検査を行い、匿名化には一切触れません。`run` はパックを読みません（本機能はオプトインで、run のパスは v0.4.0 とバイト単位で同一です）。
+
+```bash
+sieve-crowd inspect people.csv --config-out config.json --hint-pack my.json
+sieve-crowd plan   people.csv -c config.json    --hint-pack my.json --findings-json findings.json
+```
+
+- `--hint-pack FILE` — パックを読み込む（複数指定可・重複 id は拒否）。組み込みの `jp-basic` パックも一緒に読み込みます。
+- `--no-builtin-hints` — `jp-basic` を除外し、指定したパックのみを使います。
+- `--findings-json FILE` — 所見を JSON で書き出します。集計値と列名のみで、**セルの値は一切出ません**。
+
+パック（`schema: 1`・`utf-8-sig` で読み込み）はルールのリストです。各ルールは `when`（`column_names` と/または `value_shape` で列を照合）、省略可能な `suggest`（役割＋一般化器の設定・その列だけ `_suggest` に書き込まれる）、省略可能な `check`（`set`/`range`/`luhn`/`my_number`/`email_shape`・各 3 値: 一致/不一致/無法検査）、省略可能な `leak` フラグ（直接識別子らしい値を件数のみで報告・値は出さない）を持ちます。`value_shape` 言語は暴走を防ぐため意図的に閉じています: `#` は数字 1 桁、`@` は英字 1 桁、`\X` は X の字面エスケープ、量化子は `{m}`/`{m,n}` のみ（選択・入れ子なし・バックトラック暴走の余地なし）。
+
+組み込みの `jp-basic` パックは、日本の郵便番号（`prefix` length 4）、電話/マイナンバー/メール/カード番号の漏洩検査（Luhn と公式のマイナンバー検査数字）、47 都道府県を 8 地方ブロック区分の `category` 階層として（三重 = 近畿・新潟 = 中部・パック内に基準を 1 つ固定）、年齢、そして 3 つの観測警告をカバーします: `role_mismatch`（`qi` を提案した列が `keep`/`sensitive` として宣言されている）、`mixed_form`（全角・半角が混在 — NFC では別の群れになる）、`japanese_era`（和暦形式の値）。基準を変えるにはパックを編集してください。ヒントは run に影響しません。
 
 ---
 
