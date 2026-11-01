@@ -138,22 +138,28 @@ Yamamoto Aoi,1971-10-04,55,1510061,M,flu        55-59,15100**,M,asthma
 
 ---
 
-## 🧪 ヒントパック（オプトイン）
+## 🧪 ヒントパック（組み込みは既定オン）
 
-`inspect` と `plan` は**ヒントパック**（JSON ファイル）を読み込めます。列への役割・一般化器の提案と値の形の検査を行い、匿名化には一切触れません。`run` はパックを読みません（本機能はオプトインで、run のパスは v0.4.0 とバイト単位で同一です）。
+`inspect` と `plan` は**ヒントパック**（JSON ファイル）を読み込みます。列への役割・一般化器の提案と値の形の検査を行い、匿名化には一切触れません。v0.5.1 から組み込みの `jp-basic` パックは**既定で読み込まれ**ます。`--no-builtin-hints` で除外します。`run` はパックを読みません（run のパスは v0.4.0 とバイト単位で同一です。`--no-builtin-hints` を付けてパックを指定しなければ、inspect のテンプレートまで v0.4.0 とバイト一致のままです）。
 
 ```bash
-sieve-crowd inspect people.csv --config-out config.json --hint-pack my.json
-sieve-crowd plan   people.csv -c config.json    --hint-pack my.json --findings-json findings.json
+sieve-crowd inspect people.csv --config-out config.json              # 組み込み jp-basic を含めて提案
+sieve-crowd plan   people.csv -c config.json    --findings-json f.json
+sieve-crowd inspect people.csv --hint-pack my.json                   # 組み込み + my.json
+sieve-crowd inspect people.csv --config-out t.json --no-builtin-hints  # v0.4.0 バイト一致の経路
 ```
 
-- `--hint-pack FILE` — パックを読み込む（複数指定可・重複 id は拒否）。組み込みの `jp-basic` パックも一緒に読み込みます。
-- `--no-builtin-hints` — `jp-basic` を除外し、指定したパックのみを使います。
-- `--findings-json FILE` — 所見を JSON で書き出します。集計値と列名のみで、**セルの値は一切出ません**。
+- `--hint-pack FILE` — 組み込みに加えてパックを読み込む（複数指定可）。読み込み順は組み込みが先、次にコマンドラインの指定順。`findings` の `packs` / `pack_info` と候補の並びもこの順序に従います。
+- `--no-builtin-hints` — `jp-basic` を除外し、指定したパックのみを使います（指定がなければ何も読み込まず、v0.4.0 バイト一致の出力のままです）。
+- `--findings-json FILE` — 所見を JSON で書き出します。集計値と列名のみで、**セルの値は一切出ません**。`packs` は従来どおりパック id の配列。新しいトップレベルの `pack_info` が読み込み順に `{id, version, source, sha256}` を加えます。
 
-パック（`schema: 1`・`utf-8-sig` で読み込み）はルールのリストです。各ルールは `when`（`column_names` と/または `value_shape` で列を照合）、省略可能な `suggest`（役割＋一般化器の設定・その列だけ `_suggest` に書き込まれる）、省略可能な `check`（`set`/`range`/`luhn`/`my_number`/`email_shape`・各 3 値: 一致/不一致/無法検査）、省略可能な `leak` フラグ（直接識別子らしい値を件数のみで報告・値は出さない）を持ちます。`value_shape` 言語は暴走を防ぐため意図的に閉じています: `#` は数字 1 桁、`@` は英字 1 桁、`\X` は X の字面エスケープ、量化子は `{m}`/`{m,n}` のみ（選択・入れ子なし・バックトラック暴走の余地なし）。
+**パック id とルール id は組み込みを含め全パックで一意です。** 組み込みと同じ `jp-basic`（または `jp-phone` などのルール id）を使うユーザーパックは終了コード 2 で拒否されます。組み込みを差し替えるには、`--no-builtin-hints` を付けてからその id を使ってください。
 
-組み込みの `jp-basic` パックは、日本の郵便番号（`prefix` length 4）、電話/マイナンバー/メール/カード番号の漏洩検査（Luhn と公式のマイナンバー検査数字）、47 都道府県を 8 地方ブロック区分の `category` 階層として（三重 = 近畿・新潟 = 中部・パック内に基準を 1 つ固定）、年齢、そして 3 つの観測警告をカバーします: `role_mismatch`（`qi` を提案した列が `keep`/`sensitive` として宣言されている）、`mixed_form`（全角・半角が混在 — NFC では別の群れになる）、`japanese_era`（和暦形式の値）。基準を変えるにはパックを編集してください。ヒントは run に影響しません。
+パック（`schema: 1`・`utf-8-sig` で読み込み・省略可能な `version` 文字列）はルールのリストです。各ルールは `when`（`column_names` と/または `value_shape` で列を照合）、省略可能な `suggest`（役割＋一般化器の設定・その列だけ `_suggest` に書き込まれる）、省略可能な `check`（`set`/`range`/`luhn`/`my_number`/`email_shape`・各 3 値: 一致/不一致/無法検査）、省略可能な `leak` フラグを持ちます。`value_shape` 言語は暴走を防ぐため意図的に閉じています: `#` は数字 1 桁、`@` は英字 1 桁、`\X` は X の字面エスケープ、量化子は `{m}`/`{m,n}` のみ（選択・入れ子なし・バックトラック暴走の余地なし）。
+
+**漏洩検査（v0.5.1）。** `leak: true` のルールは、検査対象の列を *トークン* 単位で走査します。セルを空白と句読点で区切り（`-`・`+`・`@`・`.`・`_`・`%` は区切らない）、文章の途中に混ざった番号も見つけます（`03-1234-5678` はハイフンを除いた形でも照合します）。空白で区切られた断片は決して結合しません — `03 1234 5678` は**検出されません**（文書化した制約）。4096 文字を超えるセルは検査せず `skipped` として数えます。`plan` では宣言された役割が `keep`・`sensitive`・`qi` の列だけを検査し（id/drop は決して検査しません）、`inspect` は役割がないので全列を記録します。件数は `leaks[]`（`count`・`checked`・`skipped`、列には plan のみ `declared_role`）で報告され、`plan` では件数 1 以上のとき stderr の警告行と `findings.warnings` の `code: "leak"` 要素が出ます。`inspect` は代わりに候補と同じ書式の 1 行を出します。数字は「可能性」であって証明ではなく、警告は終了コードを変えません。
+
+組み込みの `jp-basic` パック（version 1.0.0）は、日本の郵便番号（`prefix` length 4）、電話/マイナンバー/メール/カード番号の漏洩検査（Luhn と公式のマイナンバー検査数字）、47 都道府県を 8 地方ブロック区分の `category` 階層として（三重 = 近畿・新潟 = 中部・パック内に基準を 1 つ固定）、年齢、そして 3 つの観測警告をカバーします: `role_mismatch`（`qi` を提案した列が `keep`/`sensitive` として宣言されている）、`mixed_form`（全角・半角が混在 — NFC では別の群れになる）、`japanese_era`（和暦形式の値）。基準を変えるにはパックを編集してください。ヒントは run に影響しません。
 
 ---
 
