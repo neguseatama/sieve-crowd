@@ -37,9 +37,15 @@ SCHEMA = 1
 MAX_PACK_BYTES = 1 << 20      # 1 MiB initial ceiling (declared; raise after measurement)
 MAX_RULES = 200               # initial ceiling
 MAX_NAME_CHARS = 128          # column_names / id length ceiling
+MAX_CELL_CHARS = 4096         # cells longer than this are skipped in the leak scan
 
 _CHECK_KINDS = ("set", "range", "luhn", "my_number", "email_shape")
 _ERA = re.compile(r"(明治|大正|昭和|平成|令和)\d{1,2}年")
+# A token is a run of ASCII alphanumerics plus the characters that glue numbers
+# and addresses together (- + @ . _ %).  Everything else — whitespace,
+# punctuation, prose in any script — separates tokens.  Dashes stay inside a
+# token so 03-1234-5678 is one token; dots stay so a@example.co.jp is one.
+_TOKENS = re.compile(r"[0-9A-Za-z\-+@._%]+")
 _FULLWIDTH_DIGIT = "".join(chr(c) for c in range(0xFF10, 0xFF1A))      # ０..９
 _FULLWIDTH_UPPER = "".join(chr(c) for c in range(0xFF21, 0xFF3B))      # Ａ..Ｚ
 _FULLWIDTH_LOWER = "".join(chr(c) for c in range(0xFF41, 0xFF5B))      # ａ..ｚ
@@ -143,6 +149,21 @@ def _eval_check(check: "Check", value: str) -> str:
     if kind == "email_shape":
         return "match" if _EMAIL.match(value) else "mismatch"
     raise ConfigError(f"unknown check kind: {kind!r}")   # validated earlier; defensive
+
+
+def _token_matches(rule: "Rule", token: str) -> bool:
+    """One token against a leak rule.  The plain token is tried first (emails
+    keep their dots); a dashed token is also tried without its dashes, so
+    formatted numbers (03-1234-5678, 4242-4242-4242-4242) reach the digit
+    shapes and the digit-only checks.  Space-separated pieces are separate
+    tokens and never re-combined (documented constraint)."""
+    if rule.shape is not None:
+        return bool(rule.shape.match(token)) or (
+            "-" in token and bool(rule.shape.match(token.replace("-", ""))))
+    if rule.check is not None:
+        return _eval_check(rule.check, token) == "match" or (
+            "-" in token and _eval_check(rule.check, token.replace("-", "")) == "match")
+    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -334,6 +355,7 @@ class ColumnFindings:
     candidates: list[dict] = field(default_factory=list)
     checks: list[dict] = field(default_factory=list)
     leaks: list[dict] = field(default_factory=list)
+    declared_role: Optional[str] = None   # plan only: the role the config declares
 
 
 @dataclass
@@ -352,6 +374,8 @@ class Findings:
             if not cf.candidates and not cf.checks and not cf.leaks:
                 continue
             entry: dict = {}
+            if cf.declared_role is not None:
+                entry["declared_role"] = cf.declared_role
             if cf.candidates:
                 entry["candidates"] = cf.candidates
             if cf.checks:
@@ -396,6 +420,17 @@ class Findings:
                     lines.append(
                         f"  - japanese_era: \"{w['column']}\" has {w['count']} value(s) in a "
                         f"Japanese-era form (prefer ISO dates)")
+            elif code == "leak":
+                if ja:
+                    lines.append(
+                        f"  - leak: 「{w['column']}」（宣言 {w['declared_role']}）: "
+                        f"空でない {w['checked']} 件のうち {w['count']} 件に "
+                        f"{w['pack']}/{w['rule']} が含まれる可能性があります")
+                else:
+                    lines.append(
+                        f"  - leak: \"{w['column']}\" (declared {w['declared_role']}): "
+                        f"{w['count']} of {w['checked']} non-empty cells may contain "
+                        f"{w['pack']}/{w['rule']}")
         return lines
 
 
@@ -426,6 +461,15 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
         norm_name = _norm_name(name)
         cf = cols[name]
 
+        # Leak-scan scoping (B): plan scans only the columns whose declared role
+        # is keep/sensitive/qi — id/drop are never scanned.  Inspect has no roles
+        # and scans every column.  Nothing but counts is recorded.
+        leak_target = cfg_roles is None or cfg_roles.get(name) in ("keep", "sensitive", "qi")
+        if leak_target and cfg_roles is not None:
+            cf.declared_role = cfg_roles.get(name)
+        cell_tokens = [None if len(v) > MAX_CELL_CHARS else tuple(_TOKENS.findall(v))
+                       for v in nonempty] if leak_target else ()
+
         best: Optional[tuple[int, Rule]] = None      # (evidence rank, rule) for _suggest
         for pack in packs:
             for rule in pack.rules:
@@ -435,7 +479,10 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
                 check_match = rule.check is not None and any(
                     _eval_check(rule.check, v) == "match" for v in nonempty)   # type: ignore[union-attr]
                 value_signal = shape_match or check_match
-                if not (name_match or value_signal):
+                # B: a leak rule is evaluated on every scanned column regardless
+                # of name/value signals — prose-embedded identifiers must be
+                # found in columns that neither look named nor shape-matched.
+                if not (name_match or value_signal or rule.leak):
                     continue
                 if name_match and value_signal:
                     evi = "name+value"
@@ -452,19 +499,28 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
                     cf.checks.append({"pack": pack.id, "rule": rule.id,
                                       "kind": rule.check.kind, **agg})   # type: ignore[union-attr]
 
-                # leak count (values that look like a direct identifier — a shape
-                # match, or a check match when the rule has no shape, e.g. email.
-                # No value is emitted, only the count.)
-                if rule.leak:
-                    if rule.shape is not None:
-                        n = sum(1 for v in nonempty if rule.shape.match(v))   # type: ignore[union-attr]
-                    elif rule.check is not None:
-                        n = sum(1 for v in nonempty
-                                if _eval_check(rule.check, v) == "match")     # type: ignore[union-attr]
-                    else:
-                        n = 0
-                    if n:
-                        cf.leaks.append({"pack": pack.id, "rule": rule.id, "count": n})
+                # leak count (B): values that look like a direct identifier are
+                # matched as prose tokens (see _token_matches); cells over
+                # MAX_CELL_CHARS are skipped and counted as skipped.  No value
+                # is emitted, only the counts.  On plan a count >= 1 also adds a
+                # warnings element (code leak) so the stderr line appears.
+                if rule.leak and leak_target:
+                    count = checked = 0
+                    for tokens in cell_tokens:
+                        if tokens is None:
+                            continue
+                        checked += 1
+                        if any(_token_matches(rule, t) for t in tokens):
+                            count += 1
+                    skipped = len(nonempty) - checked
+                    if count or skipped:
+                        cf.leaks.append({"pack": pack.id, "rule": rule.id, "count": count,
+                                         "checked": checked, "skipped": skipped})
+                        if count and cfg_roles is not None:
+                            warnings.append({"code": "leak", "column": name,
+                                             "declared_role": cf.declared_role,
+                                             "pack": pack.id, "rule": rule.id,
+                                             "count": count, "checked": checked})
 
                 # candidate for the template
                 if rule.suggest is not None:

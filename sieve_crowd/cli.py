@@ -172,6 +172,15 @@ def _cmd_inspect(a: argparse.Namespace) -> int:
                     print(f"      * hint-pack {cand['pack']}/{cand['rule']}: suggests {summ} (evidence: {cand['evidence']})")
                 else:
                     print(f"      * ヒントパック {cand['pack']}/{cand['rule']}: {summ} を提案（根拠: {cand['evidence']}）")
+        if findings:                                    # B: inspect leak line (candidate format)
+            for lk in findings.columns[c["name"]].leaks:
+                if lk["count"]:
+                    if en:
+                        print(f"      * leak: {lk['count']} of {lk['checked']} non-empty cells "
+                              f"may contain {lk['pack']}/{lk['rule']}")
+                    else:
+                        print(f"      * 漏洩の可能性: 空でない {lk['checked']} 件のうち "
+                              f"{lk['count']} 件に {lk['pack']}/{lk['rule']} が含まれる可能性があります")
     if findings:
         for line in findings.warning_lines(a.lang):
             print(line, file=sys.stderr)

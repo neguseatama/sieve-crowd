@@ -169,7 +169,9 @@ class T5SuggestAppears(unittest.TestCase):
 
 
 class T6LeakCheck(unittest.TestCase):
-    """A Luhn-passing card-shaped value in a non-id column is a leak (count, no value)."""
+    """A Luhn-passing card-shaped value in a scanned column is a leak (count, no value).
+    v0.5.1 (B): only keep/sensitive/qi columns are scanned on plan, so the card
+    column is declared qi here; T15 pins the role scoping itself."""
     def test_card_leak_counted_without_value(self):
         # 4242424242424242 passes Luhn; the leak count is reported, never the value.
         csv = b"memo,card\nx,4242424242424242\ny,4242424242424242\nz,not-a-card\n"
@@ -177,7 +179,7 @@ class T6LeakCheck(unittest.TestCase):
             src = _write(d, "in.csv", csv)
             cfg = _write(d, "c.json", json.dumps(
                 {"k": 2, "columns": {"memo": {"role": "qi", "type": "exact"},
-                                     "card": {"role": "drop"}}}).encode())
+                                     "card": {"role": "qi", "type": "exact"}}}).encode())
             pack = _write(d, "p.json", json.dumps(
                 {"schema": 1, "id": "p", "rules": [
                     {"id": "card", "when": {"value_shape": "#{13,19}"},
@@ -456,6 +458,111 @@ class T14DefaultOn(unittest.TestCase):
             call("inspect", src, "--hint-pack", pack, "--findings-json", fj)
             f = json.load(open(fj))
             self.assertEqual(f["packs"], ["jp-basic", "p"])   # builtin + the given pack
+
+
+class T15LeakRoles(unittest.TestCase):
+    """B (v0.5.1): the leak scan follows declared roles on plan — only
+    keep/sensitive/qi columns are scanned (id/drop are not), and a stderr
+    warning line plus a findings.warnings element (code leak) appear when a
+    count is 1 or more.  Inspect has no roles: every column is recorded in
+    findings, there is no stderr leak line and no leak in warnings, and the
+    candidates-format stdout line carries the count instead."""
+
+    CSV = ("memo,secret,age\n"
+           "call 03-1234-5678 please,03-1234-5678,40\n"
+           "nothing here,plain text,41\n").encode()
+    CFG = json.dumps({"k": 2, "columns": {
+        "memo": {"role": "keep"},
+        "secret": {"role": "id", "action": "drop"},
+        "age": {"role": "qi", "type": "numeric", "widths": [5, 10]}}}).encode()
+
+    def test_plan_scans_keep_sensitive_qi_only_and_warns(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            cfg = _write(d, "c.json", self.CFG)
+            fj = _write(d, "f.json", b"")
+            rc, out, err = call("plan", src, "-c", cfg, "--findings-json", fj)
+            self.assertEqual(rc, 0)
+            f = json.load(open(fj))
+            memo = f["columns"]["memo"]
+            leak = next(l for l in memo["leaks"] if l["rule"] == "jp-phone")
+            self.assertEqual(leak["count"], 1)
+            self.assertEqual(leak["checked"], 2)            # both non-empty cells scanned
+            self.assertEqual(memo["declared_role"], "keep") # new key (plan only)
+            # secret is id/drop: not scanned at all — no leaks, no declared_role
+            self.assertNotIn("leaks", f["columns"].get("secret", {}))
+            self.assertNotIn("declared_role", f["columns"].get("secret", {}))
+            codes = [w["code"] for w in f["warnings"]]
+            self.assertIn("leak", codes)
+            w = next(w for w in f["warnings"] if w["code"] == "leak")
+            self.assertEqual((w["column"], w["rule"], w["count"]), ("memo", "jp-phone", 1))
+            self.assertIn('leak: "memo"', err)               # stderr warning line
+            self.assertIn("may contain jp-basic/jp-phone", err)
+            self.assertNotIn("03-1234-5678", err)            # no cell value anywhere
+            self.assertNotIn("03-1234-5678", open(fj).read())
+
+    def test_inspect_records_all_columns_without_stderr_warning(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", self.CSV)
+            fj = _write(d, "f.json", b"")
+            rc, out, err = call("inspect", src, "--findings-json", fj)
+            self.assertEqual(rc, 0)
+            f = json.load(open(fj))
+            self.assertIn("leaks", f["columns"]["memo"])
+            self.assertIn("leaks", f["columns"]["secret"])   # inspect records every column
+            self.assertNotIn("declared_role", f["columns"]["memo"])
+            self.assertNotIn("leak", [w["code"] for w in f["warnings"]])
+            self.assertNotIn('leak: "memo"', err)            # no stderr leak line on inspect
+            self.assertIn("may contain jp-basic/jp-phone", out)  # stdout line, candidate format
+            self.assertNotIn("03-1234-5678", out)
+
+
+class T16SubstringScan(unittest.TestCase):
+    """B (v0.5.1): leak rules match tokens inside prose.  A token is a run of
+    ASCII alphanumerics plus - + @ . _ %; whitespace and punctuation separate
+    tokens; a dashed token is also tried without its dashes, so formatted
+    numbers (03-1234-5678, 4242-4242-4242-4242) reach the digit shapes/checks.
+    Space-separated phone pieces stay separate tokens and are NOT detected
+    (documented constraint).  Cells over 4096 chars are skipped (counted)."""
+
+    PROSE = ("memo,age\n"
+             "連絡先は03-1234-5678まで,40\n"
+             "email: a@example.co.jp,41\n"
+             "card 4242-4242-4242-4242 ok,42\n"
+             "no. 123456789018,43\n").encode()
+    CFG = json.dumps({"k": 2, "columns": {
+        "memo": {"role": "qi", "type": "exact"},
+        "age": {"role": "qi", "type": "numeric", "widths": [5, 10]}}}).encode()
+
+    def _leaks_for(self, csv):
+        with tempfile.TemporaryDirectory() as d:
+            src = _write(d, "in.csv", csv)
+            cfg = _write(d, "c.json", self.CFG)
+            fj = _write(d, "f.json", b"")
+            rc, _, err = call("plan", src, "-c", cfg, "--findings-json", fj, "--quiet")
+            self.assertEqual(rc, 0, err)
+            f = json.load(open(fj))
+            return f["columns"]["memo"].get("leaks", [])
+
+    def test_numbers_inside_prose_are_detected(self):
+        rules = {l["rule"]: l["count"] for l in self._leaks_for(self.PROSE)}
+        for rule in ("jp-phone", "jp-email", "jp-card", "jp-mynumber"):
+            self.assertGreaterEqual(rules.get(rule, 0), 1, rule)
+        self.assertEqual(rules.get("jp-phone"), 1)          # one cell carries a phone
+
+    def test_whitespace_separated_phone_is_not_detected(self):
+        csv = b"memo,age\ncall 03 1234 5678 today,40\nnothing,41\n"
+        rules = {l["rule"]: l["count"] for l in self._leaks_for(csv)}
+        self.assertNotIn("jp-phone", rules)                  # separate tokens never combine
+
+    def test_oversized_cells_are_skipped(self):
+        long_cell = "x" * 5000 + " 0312345678"               # > 4096 chars, holds a phone
+        csv = ("memo,age\n" + long_cell + ",40\ncall 0312345678 now,41\n").encode()
+        leaks = self._leaks_for(csv)
+        phone = next(l for l in leaks if l["rule"] == "jp-phone")
+        self.assertEqual(phone["count"], 1)                  # only the small cell counted
+        self.assertEqual(phone["checked"], 1)
+        self.assertEqual(phone["skipped"], 1)                # oversized cell: skipped, counted
 
 
 class T17DuplicateIdsRefused(unittest.TestCase):
