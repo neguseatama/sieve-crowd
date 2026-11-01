@@ -149,7 +149,7 @@ sieve-crowd inspect people.csv --hint-pack my.json                   # builtin +
 sieve-crowd inspect people.csv --config-out t.json --no-builtin-hints  # v0.4.0 byte-exact route
 ```
 
-- `--hint-pack FILE` — load a pack in addition to the built-in (may be given more than once). Load order: the builtin first, then the command-line order; `findings.packs` / `pack_info` and candidate lists follow that order.
+- `--hint-pack FILE` — load a pack in addition to the built-in (may be given more than once). Load order: the builtin first, then the command-line order; `findings.packs` / `pack_info` follow that order. The candidate order is its own contract (v0.5.2), independent of load order and of the order rules are written in a pack: evidence strength (name+value → value → name → stat), then role (id → sensitive → qi, roles outside this list last), then rule id ascending. `_suggest` follows the first sorted candidate.
 - `--no-builtin-hints` — exclude `jp-basic` (use only the packs you named; with none named, nothing is loaded and the v0.4.0 byte-exact output survives).
 - `--findings-json FILE` — write the findings as JSON: aggregates and column names only, **never a cell value**. `packs` stays a list of pack ids; the new top-level `pack_info` adds `{id, version, source, sha256}` per pack in load order.
 

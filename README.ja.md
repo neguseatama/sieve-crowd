@@ -149,7 +149,7 @@ sieve-crowd inspect people.csv --hint-pack my.json                   # 組み込
 sieve-crowd inspect people.csv --config-out t.json --no-builtin-hints  # v0.4.0 バイト一致の経路
 ```
 
-- `--hint-pack FILE` — 組み込みに加えてパックを読み込む（複数指定可）。読み込み順は組み込みが先、次にコマンドラインの指定順。`findings` の `packs` / `pack_info` と候補の並びもこの順序に従います。
+- `--hint-pack FILE` — 組み込みに加えてパックを読み込む（複数指定可）。読み込み順は組み込みが先、次にコマンドラインの指定順。`findings` の `packs` / `pack_info` はこの順序に従います。候補の並びは独立の契約です（v0.5.2）: 根拠の強さ（name+value → value → name → stat）→ 役割（id → sensitive → qi・一覧にない役割は最後）→ ルール id の昇順 — 読み込み順にもパック内のルールの記述順にも従いません。`_suggest` は並べ替え後の先頭の候補に従います。
 - `--no-builtin-hints` — `jp-basic` を除外し、指定したパックのみを使います（指定がなければ何も読み込まず、v0.4.0 バイト一致の出力のままです）。
 - `--findings-json FILE` — 所見を JSON で書き出します。集計値と列名のみで、**セルの値は一切出ません**。`packs` は従来どおりパック id の配列。新しいトップレベルの `pack_info` が読み込み順に `{id, version, source, sha256}` を加えます。
 
