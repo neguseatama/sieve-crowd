@@ -20,8 +20,11 @@ The matching vocabulary is a closed set:
   — evaluations that return three values: **match / mismatch / cannot-check**.
 
 Findings carry aggregates and column names only — **no cell value ever appears**
-in a finding, a warning, or a suggestion.  Evidence is reported in the priority
-order: name+value → value → name → stat.
+in a finding, a warning, or a suggestion.  Candidate lists are ordered by
+contract, not by load order or by the order rules appear in a pack: evidence
+strength (name+value → value → name → stat), then role (id → sensitive → qi;
+roles outside this list come last), then rule id ascending.  ``_suggest``
+follows the first candidate of the sorted list.
 """
 from __future__ import annotations
 
@@ -448,6 +451,17 @@ class Findings:
 
 
 _EVIDENCE_ORDER = {"name+value": 0, "value": 1, "name": 2, "stat": 3}
+_ROLE_ORDER = {"id": 0, "sensitive": 1, "qi": 2}   # roles not listed here sort after qi
+
+
+def _candidate_key(cand: dict) -> tuple:
+    """a (v0.5.2): the candidate order is a contract, not load order and not the
+    order rules are written in a pack: evidence strength, then role, then rule id
+    ascending (plain string comparison).  Rule ids are unique across all packs,
+    so the key never ties."""
+    return (_EVIDENCE_ORDER[cand["evidence"]],
+            _ROLE_ORDER.get(cand["suggest"].get("role"), len(_ROLE_ORDER)),
+            cand["rule"])
 
 
 def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
@@ -493,7 +507,6 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
             n_checked = sum(1 for t in cell_tokens if t is not None)
             n_skipped = len(nonempty) - n_checked
 
-        best: Optional[tuple[int, Rule]] = None      # (evidence rank, rule) for _suggest
         for pack in packs:
             for rule in pack.rules:
                 name_match = bool(rule.column_names) and norm_name in rule.column_names
@@ -556,17 +569,18 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
                                              "pack": pack.id, "rule": rule.id,
                                              "count": count, "checked": n_checked})
 
-                # candidate for the template
+                # candidate for the template (order fixed by the sort below)
                 if rule.suggest is not None:
                     cf.candidates.append({"pack": pack.id, "rule": rule.id,
                                           "evidence": evi, "suggest": dict(rule.suggest)})
-                    rank = _EVIDENCE_ORDER[evi]
-                    if best is None or rank < best[0]:
-                        best = (rank, rule)
 
-        if best is not None:
-            extras[name] = {"_suggest": dict(best[1].suggest),
-                            "_candidates": [cand for cand in cf.candidates]}
+        # a (v0.5.2): the candidate order is a contract — evidence strength, then
+        # role, then rule id — independent of load order and of the order rules
+        # are written in a pack.  _suggest follows the first sorted candidate.
+        if cf.candidates:
+            cf.candidates.sort(key=_candidate_key)
+            extras[name] = {"_suggest": dict(cf.candidates[0]["suggest"]),
+                            "_candidates": list(cf.candidates)}
 
         # observation warnings (always emitted when scanning; value-shape only,
         # no cell values): full/half-width mixing and Japanese-era dates
