@@ -1,4 +1,4 @@
-# Sieve Crowd v0.5.0
+# Sieve Crowd
 
 English | [日本語](README.ja.md)
 
@@ -222,6 +222,27 @@ contract's conformance matrix (§6).
 2. **Not a substitute for legal or privacy review** — It does not guarantee legal or regulatory compliance under privacy laws or guidelines; it is a tool that supports such review technically.
 3. **Excel is not supported** — To keep the dependency-free principle, the binary `.xlsx` format is out of scope (use CSV / JSON / XML).
 4. **Row shuffling** — To minimize re-identification risk, the output row order is deterministically shuffled.
+
+---
+
+## 📜 Version history
+
+One line per release. The feature sections above always describe the current version; the precise contracts are specified in [SPEC](docs/SPEC.md) ([日本語版](docs/SPEC.ja.md)).
+
+| Version | Highlights |
+| :--- | :--- |
+| 0.6.2 | Municipality edition of the `jp-municipality-2026` pack (pack 1.1.0): the 総務省 "地方公共団体コード一覧" extract (basis date R6.1.1 = 2024-01-01, 1,747 municipalities) committed alongside the ABR prefecture extract, and the generator merges one prefecture + one municipality source (either order, `--pack-version`) into a single four-rule pack — 1,794 codes, 1,794 five-digit prefixes, 47 prefecture names, 1,714 distinct municipality names. Both sources are PDL 1.0. |
+| 0.6.1 | Prefecture edition committed in `packs/`: the ABR prefecture master extract (47 prefectures, PDL 1.0), the generated pack, a prefecture mode for the generator with a fail-closed prefecture-level guard, and the attribution and compliance notes in `packs/README.md`. |
+| 0.6.0 | Derived keep-vs-qi relations on `plan` (both directions, four classes, `derived_summary`, `--no-derived`); the `jp-birthdate` rule (jp-basic 1.1.0); the pack generator `tools/make_municipality_pack.py` and the `packs/` directory (generator only — the data arrived with 0.6.1). |
+| 0.5.2 | The candidate order becomes a contract: evidence strength, then role, then rule id — independent of the pack load order and of the order rules are written in a pack; `_suggest` follows the first sorted candidate. The full-width token constraint is documented. |
+| 0.5.1 | Hint packs load by default (builtin `jp-basic`); the role-aware leak scan (prose tokens, stderr warnings, `findings.warnings`); `pack_info`; duplicate pack/rule ids refused. |
+| 0.5.0 | The hint pack system for `inspect`/`plan` (opt-in; `run` untouched); a sha256-pinned replica of the Sieve Schema Contract v1 conformance corpus for the JSON core. |
+| 0.4.0 | `missing_value_policy` (`star` / `suppress` with budget sharing and `missing_exceeds_budget`); phase-2 refinement as a pruned depth-first walk (no region materialisation). |
+| 0.3.0 | The `plan` subcommand (pre-flight search-space profile with warnings); aggregate-only diagnostics in receipts for suppression and refusals; custom non-uniform numeric `bins`. |
+| 0.2.0 | The initial tagged release. |
+
+- Since 0.5.0, every release keeps the `run` path byte-for-byte identical to 0.4.0 — the engine core is frozen, and releases touch only the observation side (`inspect` / `plan`, hint packs, docs).
+- PyPI carries 0.2.0, 0.3.0, 0.4.0, 0.5.2 and everything from 0.6.0 on; 0.5.0 and 0.5.1 exist as git tags only.
 
 ---
 
