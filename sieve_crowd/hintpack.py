@@ -8,9 +8,10 @@ byte-for-byte unchanged.
 
 The matching vocabulary is a closed set:
 
-* ``column_names`` — the column's name matches one of these (NFKC + lower-case,
-  i.e. the old ``hint()`` token/substring comparison *with NFKC added*; the old
-  ``hint()`` itself is left untouched).
+* ``column_names`` — exact match against the normalized column name
+  (``unicodedata.normalize("NFKC", name).strip().lower()``; no token or
+  substring matching).  The legacy token/substring ``hint()`` route in
+  ``hints.py`` is separate and left untouched.
 * ``value_shape`` — a bounded shape pattern: ``#`` one digit, ``@`` one ASCII
   letter, ``\\X`` a literal escape of ``X``, any other character is a literal.
   Only ``{m}`` and ``{m,n}`` quantifiers are allowed, and only on the preceding
@@ -233,7 +234,7 @@ class Pack:
 
 
 def _norm_name(name: str) -> str:
-    """NFKC + lower-case: the column-name comparison the old hint() used, plus NFKC."""
+    """NFKC + strip + lower-case: exact-match normalization for ``column_names``."""
     return unicodedata.normalize("NFKC", str(name)).strip().lower()
 
 
