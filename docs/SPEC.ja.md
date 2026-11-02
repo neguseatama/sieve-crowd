@@ -106,7 +106,7 @@ Sieve Crowdは、人に関する表（CSV・JSON・XML）を、部外者がす�
 | `keygen -o F` | ランダムな鍵を書く（ファイルモード600）。`--force` なしに既存のファイルを置き換えない |
 | `run FILE -c CONFIG (-o OUT \| --dry-run)` | 匿名化。オプション：`--key-file --k --l --max-suppression --missing-value-policy --keep-order --shuffle-seed --lang --delimiter --in-format --out-format --max-rows --max-evals --report-json --quiet --force` |
 | `plan FILE -c CONFIG` | 実行前の事前プロファイル。探索の前に：オプション `--k --l --max-suppression --missing-value-policy --max-rows --max-evals --key-file --lang --delimiter --in-format --report-json --quiet --hint-pack --no-builtin-hints --no-derived --no-hidden-chars --findings-json` |
-| `audit FILE -c CONFIG` | 表をいまのまま観測 — 一般化も判定も書き込みもしない（§13）：オプション `--subject --lang --delimiter --in-format --max-rows --max-evals --findings-json --quiet` |
+| `audit FILE -c CONFIG` | 表を今のまま観測 — 一般化も判定も書き込みもしない（§13）：オプション `--subject --lang --delimiter --in-format --max-rows --max-evals --findings-json --quiet` |
 
 plan はそれ自身がレシートです（`status = "plan"`）。報告するのは**正確な値だけ**です。格子の大きさと最大の高さは設定だけから決まり
 （各QIは `levels + 1` 個の節を生む）、除外の上限は `min(n − 1, ⌊max_suppression × n⌋)`、列ごとの観察と段階0の群れの統計
@@ -124,7 +124,7 @@ plan は探索を実行せず、表を書かず、終了コード 0 で終わり
 
 ### 形式
 
-対応するのは CSV・JSON・XML だけです。Excel（`.xlsx`／`.xls`）は意図的に対応していません。ファイルの形式は拡張子（`.csv`、`.json`、`.xml`）で判定し、
+対応するのは CSV・JSON・XML だけです。外部ライブラリに依存しないため、現行までは Excel（`.xlsx`／`.xls`）を対象外としています。ファイルの形式は拡張子（`.csv`、`.json`、`.xml`）で判定し、
 `--in-format` / `--out-format` で上書きします（stdin／stdout や拡張子のない名前を曖昧でなくします。`-` は指定がなければ CSV）。`--delimiter` は CSV 専用で、
 JSON／XML に対して指定すると拒否されます。
 
@@ -219,7 +219,7 @@ JSON／XML に対して指定すると拒否されます。
 
 ## 13. audit（v0.7.0、観測のみ）
 
-`audit FILE -c CONFIG [--subject COLUMN] [--findings-json FILE] [--lang]` は、表を **いまのまま** 観測します。一般化もせず、除外もせず、拒否もせず、判定もしません。`plan` が実行の見積り、`run` が表の変換だとすれば、`audit` は数えるだけです。報告はすべて整数で、割合は千分率の切り捨て（`1000 * count // n`、`n = 0` は 0）。浮動小数点は一切計算しないため、同じ表はどの環境でもバイト同一の出力になります。設定から使うのは `qi` 列・`k`・`l` と各列の役割（subject の検証用）だけで、**一般化は適用しません**。表の値をそのまま観測します。オプション `--delimiter --in-format --max-rows --max-evals --findings-json --quiet --lang` は `plan` と同じ挙動で、人間向けの報告は stderr に、stdout は空のまま、書き込むファイルは任意の `--findings-json` だけです。終了コード： 0（観測の完了。警告があっても 0）· 1（I/O）· 2（設定/使い方/入力）。拒否の状態はありません。
+`audit FILE -c CONFIG [--subject COLUMN] [--findings-json FILE] [--lang]` は、表を **今のまま** 観測します。一般化もせず、除外もせず、拒否もせず、判定もしません。`plan` が実行の見積り、`run` が表の変換だとすれば、`audit` は数えるだけです。報告はすべて整数で、割合は千分率の切り捨て（`1000 * count // n`、`n = 0` は 0）。浮動小数点は一切計算しないため、同じ表はどの環境でもバイト同一の出力になります。設定から使うのは `qi` 列・`k`・`l` と各列の役割（subject の検証用）だけで、**一般化は適用しません**。表の値をそのまま観測します。オプション `--delimiter --in-format --max-rows --max-evals --findings-json --quiet --lang` は `plan` と同じ挙動で、人間向けの報告は stderr に、stdout は空のまま、書き込むファイルは任意の `--findings-json` だけです。終了コード： 0（観測の完了。警告があっても 0）· 1（I/O）· 2（設定/使い方/入力）。拒否の状態はありません。
 
 **既存方針との一致。** 値はエンジンの `_norm`（NFC＋前後空白除去）で比較し、同値類は `measure`/`diagnose` の段階 0 と同じ作り方です。すべての行が参加し、空の QI 値は空文字列という値として振る舞い、`missing_value_policy` は**適用しません**（行を除外するのは変換であって観測ではないため）。したがってこれらは `plan` が段階 0 の `before` として報告するのと同じ数 — `count` = `crowds`、`min_size` = `smallest_crowd`、`unique_rows` = `records_alone`、`rows_below_k` = `records_below_k` — で、同じ名前なら同じ数です（T31 が固定）。
 

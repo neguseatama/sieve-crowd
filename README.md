@@ -57,6 +57,8 @@ Sieve is a family of engines that share three design principles — deterministi
   Implemented with the Python standard library only. Data never leaves your computer (no account, offline, no upload).
 - **Minimal generalization and suppression**
   Data is not rounded more than necessary; resolution is preserved as much as possible while grouping. Records that still cannot form a group are safely removed (suppressed) rather than distorted.
+- **Role suggestions (hint packs)**
+  `inspect` / `plan` read the built-in `jp-basic` pack (on by default since v0.5.1, `--no-builtin-hints` to exclude) and suggest a role and check value shapes for each column. Japanese personal columns — person names, kana names, addresses, birth dates, emails, phone numbers, My Numbers, card numbers, postal codes (the dash form `123-4567` since v0.7.3) — are matched by name and by value, and the pack proposes direct identifiers (`id`) and quasi-identifiers (`qi`). A suggestion is written only when the rule shows a name or a value signal on the column (since v0.7.3), and a mismatch with the declared role is observed as `role_mismatch`. Hints never touch anonymization.
 - **Pre-flight plan**
   `sieve-crowd plan` reports, before any search, the exact search-space size (lattice nodes), the suppression budget, the level-0 risk profile and warnings (unreachable k/l, tight limits, many isolated records) — plus, since v0.6.0, the derived keep-vs-qi relations (does a kept column nearly determine a quasi-identifier, in either direction) — so tuning happens before the run, not after.
 - **Audit the table as it is**
@@ -245,7 +247,7 @@ contract's conformance matrix (§6).
 
 1. **Model assumption** — Sieve Crowd protects against an attacker who knows the attributes you declared as `qi` (quasi-identifiers). It is not a universal shield against re-identification through auxiliary information you did not anticipate.
 2. **Not a substitute for legal or privacy review** — It does not guarantee legal or regulatory compliance under privacy laws or guidelines; it is a tool that supports such review technically.
-3. **Excel is not supported** — To keep the dependency-free principle, the binary `.xlsx` format is out of scope (use CSV / JSON / XML).
+3. **Excel is not supported** — Since the tool depends on no external library, the binary `.xlsx` format remains out of scope for now (use CSV / JSON / XML).
 4. **Row shuffling** — To minimize re-identification risk, the output row order is deterministically shuffled.
 5. **Column-name matching still depends on the Unicode database** — Since v0.7.1 the *value* matching folds through a fixed, sha256-pinned table, so it no longer depends on the runtime Unicode data. Column **names** are still matched with NFKC (the v0.5.0 decision), which remains the one place where the Python Unicode database version can influence the result (a future release may fix the column-name normalization too).
 

@@ -135,7 +135,7 @@ UTF-8 with `\n` line ends.
 
 ### Formats
 
-CSV, JSON and XML only; Excel files (`.xlsx`/`.xls`) are deliberately unsupported. A file's format is its extension
+CSV, JSON and XML only; since the tool depends on no external library, Excel files (`.xlsx`/`.xls`) remain out of scope for now. A file's format is its extension
 (`.csv`, `.json`, `.xml`); `--in-format` / `--out-format` override it (and make stdin/stdout or extension-less names
 unambiguous — `-` is CSV unless told otherwise). `--delimiter` applies to CSV only and is rejected for JSON/XML.
 
