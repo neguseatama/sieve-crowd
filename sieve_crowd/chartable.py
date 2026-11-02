@@ -1,11 +1,11 @@
 """The shared character table (chartable v1) and its fixed fold.
 
 ``chartable_v1.json`` is a byte-exact replica of the Sieve Lens canonical
-table: the Lens owns the standard, this copy is pinned by sha256, and a table
-that wants to change is a conversation with the design side — never a local
-edit.  The fold is a FIXED mapping built from that file, with no lookups into
-the Python Unicode database, so identical input folds to identical output on
-every Python build.
+table: the Lens owns the standard, this copy is pinned by sha256, and
+changes to the standard are made upstream on the Lens side — not by local
+edits.  The fold is a FIXED mapping built from that file, with no lookups
+into the Python Unicode database, so identical input folds to identical
+output on every Python build.
 
 ``fold(text, dashes=False)`` applies, in this order:
 
