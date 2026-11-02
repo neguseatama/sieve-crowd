@@ -37,15 +37,25 @@ assert len(_PREF_TO_REGION) == 47
 _PACK = {
     "schema": 1,
     "id": "jp-basic",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "_comment": (
         "Built-in hints for common Japanese columns. Region classification "
         "follows the 総務省/e-Stat eight-block 地方ブロック grouping: 三重=近畿, "
         "新潟=中部, 長野/岐阜=中部. 1.1.0 adds jp-birthdate (ISO YYYY-MM-DD). "
         "1.2.0 adds jp-name-kana (kana name columns suggest id). "
         "1.3.0 adds jp-person-name and jp-address (name-only column rules; "
-        "both suggest id). Hints never affect the run output; edit this pack "
-        "to change a standard."
+        "both suggest id). "
+        "1.4.0 adds id suggestions to jp-email/jp-phone/jp-mynumber/jp-card "
+        "(role_mismatch fires for them when the column name matches and the "
+        "value has the shape; a column whose name does not match is the leak "
+        "scan's job), the requested column names (jp-email: mail_address, "
+        "メールアドレス; jp-phone: 電話番号, 携帯電話; jp-mynumber: my_number, "
+        "mynumber, マイナンバー, 個人番号; jp-card: card, card_number, "
+        "credit_card, カード番号, クレジットカード), and jp-zip-hyphen "
+        "(#{3}-#{4}; its suggestion is the same prefix 4 as jp-zip, so the "
+        "four partial levels keep the same remaining digits 6/5/4/3 and the "
+        "dash is never masked). Hints never affect the run output; edit this "
+        "pack to change a standard."
     ),
     "rules": [
         {
@@ -55,27 +65,42 @@ _PACK = {
             "suggest": {"role": "qi", "type": "prefix", "length": 4},
         },
         {
+            "id": "jp-zip-hyphen",
+            "when": {"column_names": ["zip", "zipcode", "postal", "postcode", "郵便", "〒"],
+                     "value_shape": "#{3}-#{4}"},
+            "suggest": {"role": "qi", "type": "prefix", "length": 4},
+        },
+        {
             "id": "jp-phone",
-            "when": {"column_names": ["phone", "tel", "telephone", "mobile", "電話", "携帯"],
+            "when": {"column_names": ["phone", "tel", "telephone", "mobile", "電話", "携帯",
+                                      "電話番号", "携帯電話"],
                      "value_shape": "#{10,11}"},
+            "suggest": {"role": "id"},
             "leak": True,
         },
         {
             "id": "jp-mynumber",
-            "when": {"value_shape": "#{12}"},
+            "when": {"column_names": ["my_number", "mynumber", "マイナンバー", "個人番号"],
+                     "value_shape": "#{12}"},
             "check": {"kind": "my_number"},
+            "suggest": {"role": "id"},
             "leak": True,
         },
         {
             "id": "jp-card",
-            "when": {"value_shape": "#{13,19}"},
+            "when": {"column_names": ["card", "card_number", "credit_card",
+                                      "カード番号", "クレジットカード"],
+                     "value_shape": "#{13,19}"},
             "check": {"kind": "luhn"},
+            "suggest": {"role": "id"},
             "leak": True,
         },
         {
             "id": "jp-email",
-            "when": {"column_names": ["email", "mail", "e-mail", "メール"]},
+            "when": {"column_names": ["email", "mail", "e-mail", "メール",
+                                      "mail_address", "メールアドレス"]},
             "check": {"kind": "email_shape"},
+            "suggest": {"role": "id"},
             "leak": True,
         },
         {

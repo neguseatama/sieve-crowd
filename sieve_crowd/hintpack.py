@@ -666,8 +666,14 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
                                              "pack": pack.id, "rule": rule.id,
                                              "count": count, "checked": n_checked})
 
-                # candidate for the template (order fixed by the sort below)
-                if rule.suggest is not None:
+                # candidate for the template (order fixed by the sort below).
+                # v0.7.3 gate: a suggestion needs a name or a value signal.
+                # A leak rule with neither still runs its token scan above,
+                # but it must not hang a suggestion on the column — without
+                # this gate every scanned column would carry a suggestion
+                # from a leak rule that has one (jp-email, jp-phone,
+                # jp-mynumber, jp-card since jp-basic 1.4.0).
+                if rule.suggest is not None and (name_match or value_signal):
                     cf.candidates.append({"pack": pack.id, "rule": rule.id,
                                           "evidence": evi, "suggest": dict(rule.suggest)})
 
@@ -688,18 +694,33 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
         if era:
             warnings.append({"code": "japanese_era", "column": name, "count": era})
 
-    # role_mismatch: a column suggested 'qi' (evidence name+value or value) but
-    # declared keep / sensitive in the config.  Inspect has no config -> skipped.
+    # role_mismatch (v0.5.1 qi, v0.7.3 id): a column suggested 'qi' (evidence
+    # name+value or value) but declared keep / sensitive, or suggested 'id'
+    # (evidence name+value) but declared keep / qi / sensitive.  The id side
+    # divides the labour with the leak scan: a column whose name does not
+    # match the rule is leak's job (value-only evidence never fires
+    # role_mismatch for id), and name-only evidence alone never contradicts a
+    # declaration.  id/drop declarations are never a mismatch.  One warning
+    # per column — the first qualifying candidate in the sorted order (id
+    # sorts before qi at equal evidence).  Inspect has no config -> skipped.
     if cfg_roles is not None:
         for name, cf in cols.items():
             declared = cfg_roles.get(name)
-            if declared not in ("keep", "sensitive"):
+            if declared not in ("keep", "qi", "sensitive"):
                 continue
             for cand in cf.candidates:
-                if cand["suggest"].get("role") == "qi" and cand["evidence"] in ("name+value", "value"):
+                role = cand["suggest"].get("role")
+                evi = cand["evidence"]
+                if role == "qi" and declared in ("keep", "sensitive") \
+                        and evi in ("name+value", "value"):
                     warnings.append({"code": "role_mismatch", "column": name,
                                      "declared": declared, "suggested": "qi",
-                                     "evidence": cand["evidence"]})
+                                     "evidence": evi})
+                    break
+                if role == "id" and evi == "name+value":
+                    warnings.append({"code": "role_mismatch", "column": name,
+                                     "declared": declared, "suggested": "id",
+                                     "evidence": evi})
                     break
 
     return Findings(packs_list,
