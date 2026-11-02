@@ -542,6 +542,24 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
     from ``run``, which does not reach this module anyway).
     """
     from .chartable import fold
+
+    def _make_cached(dashes: bool):
+        """A fold with a distinct-value cache; call once per column (columns
+        repeat their values heavily, so the cache is bounded by the column's
+        own distinct values)."""
+        cache: dict[str, str] = {}
+
+        def fold_cached(v: str) -> str:
+            if v.isascii():
+                return v                  # exact: no key is below U+0080
+            r = cache.get(v)
+            if r is None:
+                r = fold(v, dashes=dashes)
+                cache[v] = r
+            return r
+
+        return fold_cached
+
     pos = {h: i for i, h in enumerate(header)}
     packs_list = [p.id for p in packs]
     cols: dict[str, ColumnFindings] = {h: ColumnFindings() for h in header}
@@ -565,9 +583,13 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
         # a plain-digit cell is its own single token (skips the regex scan);
         # oversized cells are skipped regardless of shape.  v0.7.1: the cell is
         # folded (dashes=True — shape matching) before tokenizing, so full-width
-        # digits and long-vowel dashes form tokens too.
+        # digits and long-vowel dashes form tokens too; both folds are cached
+        # per column and ASCII takes the exact fast path.
+        fold_shape = _make_cached(True)
+        fold_check = _make_cached(False)
+
         def _cell_tokens(v: str):
-            fv = fold(v, dashes=True)
+            fv = fold_shape(v)
             if len(fv) > MAX_CELL_CHARS:
                 return None
             if fv.isascii() and fv.isdigit():
@@ -591,9 +613,9 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
                 # record keeps its v0.5.0 condition (a signal must exist).
                 if name_match or not rule.leak:
                     shape_match = rule.shape is not None and any(
-                        rule.shape.match(fold(v, dashes=True)) for v in nonempty)   # type: ignore[union-attr]
+                        rule.shape.match(fold_shape(v)) for v in nonempty)   # type: ignore[union-attr]
                     check_match = rule.check is not None and any(
-                        _eval_check(rule.check, fold(v, dashes=False)) == "match"
+                        _eval_check(rule.check, fold_check(v)) == "match"
                         for v in nonempty)   # type: ignore[union-attr]
                 else:
                     shape_match = check_match = False
@@ -615,7 +637,7 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
                 if rule.check is not None and (name_match or value_signal):
                     agg = {"match": 0, "mismatch": 0, "cannot_check": 0}
                     for v in values:
-                        agg[_eval_check(rule.check, fold(v, dashes=False))] += 1
+                        agg[_eval_check(rule.check, fold_check(v))] += 1
                     cf.checks.append({"pack": pack.id, "rule": rule.id,
                                       "kind": rule.check.kind, **agg})   # type: ignore[union-attr]
 

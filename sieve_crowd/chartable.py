@@ -25,6 +25,8 @@ The table loads lazily, once, and its sha256 is verified against the pin
 below; a missing, tampered or malformed table is a hard ChartableError —
 never a silent fallback.  Loading is reachable only from inspect/plan (via
 the hint pack and the hidden-character observation); ``run`` never gets here.
+Pure-ASCII input takes an exact fast path: no key of the mapping is below
+U+0080, so an ASCII string folds to itself without a table lookup.
 """
 from __future__ import annotations
 
@@ -73,6 +75,8 @@ class ChartTable:
         self._categories = categories
 
     def fold(self, text: str, dashes: bool = False) -> str:
+        if text.isascii():
+            return text        # exact fast path: no key is below U+0080
         return text.translate(self._with_dashes if dashes else self._base)
 
     def invisible_categories(self) -> dict[str, frozenset[int]]:
@@ -197,6 +201,8 @@ def _get() -> ChartTable:
 
 def fold(text: str, dashes: bool = False) -> str:
     """Fold one value through the shared table (see the module docstring)."""
+    if text.isascii():
+        return text            # exact fast path: no key is below U+0080
     return _get().fold(text, dashes)
 
 
