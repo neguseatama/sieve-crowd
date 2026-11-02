@@ -105,7 +105,7 @@ Sieve Crowdは、人に関する表（CSV・JSON・XML）を、部外者がす�
 | `inspect FILE [--config-out F] [--in-format F] [--lang]` | 列ごとの異なる値の数、空の数、値が一意な割合、見かけの形と、列名と値に基づく*ヒント*（例：「直接識別子のようです」）を表示し、役割 `?` と `_hint` コメントを含むひな形を書く。役割は自動では割り当てない |
 | `keygen -o F` | ランダムな鍵を書く（ファイルモード600）。`--force` なしに既存のファイルを置き換えない |
 | `run FILE -c CONFIG (-o OUT \| --dry-run)` | 匿名化。オプション：`--key-file --k --l --max-suppression --missing-value-policy --keep-order --shuffle-seed --lang --delimiter --in-format --out-format --max-rows --max-evals --report-json --quiet --force` |
-| `plan FILE -c CONFIG` | 実行前の事前プロファイル。探索の前に：オプション `--k --l --max-suppression --missing-value-policy --max-rows --max-evals --key-file --lang --delimiter --in-format --report-json --quiet --hint-pack --no-builtin-hints --no-derived --findings-json` |
+| `plan FILE -c CONFIG` | 実行前の事前プロファイル。探索の前に：オプション `--k --l --max-suppression --missing-value-policy --max-rows --max-evals --key-file --lang --delimiter --in-format --report-json --quiet --hint-pack --no-builtin-hints --no-derived --no-hidden-chars --findings-json` |
 | `audit FILE -c CONFIG` | 表をいまのまま観測 — 一般化も判定も書き込みもしない（§13）：オプション `--subject --lang --delimiter --in-format --max-rows --max-evals --findings-json --quiet` |
 
 plan はそれ自身がレシートです（`status = "plan"`）。報告するのは**正確な値だけ**です。格子の大きさと最大の高さは設定だけから決まり
@@ -116,6 +116,7 @@ plan はそれ自身がレシートです（`status = "plan"`）。報告する�
 準識別子が空のレコードが予算を超える）、`lattice_large`（改善フェーズの上限を超えるため
 第2段階が省略される）、`evals_tight`（格子が `max_evals` を超える）、`many_singletons`（段階0で一独りが 50% 以上 — 発見的手法）。
 現在の方針の下で準識別子が空のレコード数も報告します。v0.6.0 からは keep 列 × 準識別子の導出分析（§12）も実行します（`--no-derived` で省略）。
+v0.7.1 からは不可視文字の観測（§14）も実行します（`--no-hidden-chars` で省略）。
 plan は探索を実行せず、表を書かず、終了コード 0 で終わります。
 
 出力先が入力ファイルになることはなく、既存の出力ファイルには `--force` が必要で、書き込みは原子的に行われます。終了コード：
@@ -176,6 +177,8 @@ JSON／XML に対して指定すると拒否されます。
 | — | 同じ論理表なら、運んだ形式に関わらず同じ出力になる。JSONとXMLは往復する |
 | — | `audit` は整数だけを報告する。行/列の入れ替えと反復実行でバイト同一であり、同値類の数は `plan` の段階 0 の `before` と一致する（同じ名前なら同じ数） |
 | — | audit の findings はセルの値を含まない（subject の値も含む）。`run`/`plan`/`inspect` は audit モジュールを import しない。`config.py` / `engine.py` はバイト同一（sha256 pin） |
+| — | 折りたたみは sha256 を固定した表からの固定マッピング: 印字可能 ASCII は不変・冪等・純 ASCII の照合はバイト同一で、`chartable.py` は Unicode データベースを import しない |
+| — | 不可視文字の観測は件数と種類の名前のみ（セルの値もコードポイントも出ない）。`run` は hintpack/derived/audit/chartable/hidden_chars を import しない。`config.py` / `engine.py` / `audit.py` / `derived.py` はバイト同一（sha256 pin） |
 
 ## 11. 実装上の注意
 
@@ -204,11 +207,13 @@ JSON／XML に対して指定すると拒否されます。
 
 パックはルールのリストです。ルールの `when` は `column_names`（NFKC＋小文字化・旧 `hint()` の照合に NFKC を足したもの・旧 `hint()` 自体は不変）と/または `value_shape` で列を照合します。`value_shape` 言語は閉じた集合: `#` 数字・`@` 英字・`\X` 字面・量化子は `{m}`/`{m,n}` のみ（選択・入れ子なし・暴走なし）。ルールは `check`（`set`/`range`/`luhn`/`my_number`/`email_shape`・3 値: 一致/不一致/無法検査・Luhn とマイナンバーの検査数字は公式テストベクトル固定）、`leak`、`suggest`（役割＋一般化器設定・その列だけ `_suggest`/`_candidates` に書き込まれる）を持ちます。証拠の強さの優先度は name+value → value → name → stat。
 
-**漏洩検査（v0.5.1）。** `leak: true` のルールは、検査対象の列をトークン単位で走査します。セルを空白と句読点で区切る（`-` `+` `@` `.` `_` `%` は区切らない）ので、文章の途中に混ざった番号も見つかります。ハイフン付きトークンはハイフンを除いた形でも照合します（`03-1234-5678` → `0312345678`）。空白で区切られた断片は決して結合しません（`03 1234 5678` は検出されない・文書化した制約）。トークンは ASCII 英数字と区切らない記号の連続なので、全角の数字やハイフン（`０９０－１２３４－５６７８` など）はトークンにならず、このままでは検出されません（同種の文書化した制約）。4096 文字を超えるセルは検査せず `skipped` として数えます。`plan` では宣言された役割が `keep`・`sensitive`・`qi` の列だけを検査し（id/drop は決して検査しません）、`inspect` は役割がないので全列を記録します。件数は `columns.<列>.leaks[]` に `{pack, rule, count, checked, skipped}` で入ります（`checked` は実際に走査した空でないセル数・件数または skipped が正のとき要素が出ます）。`plan` では列に `declared_role` が付き、件数 1 以上で stderr の警告行と `warnings` の `code: "leak"` 要素（列名・宣言役割・パック・ルール・件数・checked）が出ます。`inspect` は代わりに候補と同じ書式の 1 行を出します。数字は「可能性」であって証明ではなく、警告は終了コードを変えません。
+**値の照合は共有の文字表で折りたたむ（v0.7.1）。** `value_shape`・check・漏洩検査の値の入力は、照合の前に `sieve_crowd/chartable_v1.json`（§14）で折りたたみます: `value_shape` と漏洩検査は `dashes=True`（形の照合 — 長音と他の折りたたみダッシュが `-` になり、`090ー1234ー5678` はハイフン付き 1 トークンになって既存のハイフン除去照合が働く）、値の check は `dashes=False`。折りたたみは固定マッピングなので、純 ASCII の照合は 0.7.1以前とバイト同一で、全角の数字・記号・長音ダッシュ・不可視文字が照合に届くようになります（v0.5.2 の「全角を扱えない」限界の解消）。ダッシュ入りの全角郵便番号は `#{7}` の形には一致しません（ハイフンが残るため。ダッシュの除去は形の言語にない — ハイフンを除いて照合するのは漏洩検査だけで、`jp-zip` は leak ルールではない）。列名の照合は NFKC のまま（不変・v0.5.0 の決定による、Unicode データベースに依存する最後の箇所）。
+
+**漏洩検査（v0.5.1）。** `leak: true` のルールは、検査対象の列をトークン単位で走査します。セルを空白と句読点で区切る（`-` `+` `@` `.` `_` `%` は区切らない）ので、文章の途中に混ざった番号も見つかります。ハイフン付きトークンはハイフンを除いた形でも照合します（`03-1234-5678` → `0312345678`）。空白で区切られた断片は決して結合しません（`03 1234 5678` は検出されない・文書化した制約）。v0.7.1 からはセルをトークン化の前に折りたたむ（dashes=True）ため、全角の数字やハイフン（`０９０－１２３４－５６７８`）や長音区切り（`090ー1234ー5678`）もトークンになり検出されます — 以前の「全角はトークンにならない」制約は折りたたみで解消されました（§14）。4096 文字を超えるセルは検査せず `skipped` として数えます。`plan` では宣言された役割が `keep`・`sensitive`・`qi` の列だけを検査し（id/drop は決して検査しません）、`inspect` は役割がないので全列を記録します。件数は `columns.<列>.leaks[]` に `{pack, rule, count, checked, skipped}` で入ります（`checked` は実際に走査した空でないセル数・件数または skipped が正のとき要素が出ます）。`plan` では列に `declared_role` が付き、件数 1 以上で stderr の警告行と `warnings` の `code: "leak"` 要素（列名・宣言役割・パック・ルール・件数・checked）が出ます。`inspect` は代わりに候補と同じ書式の 1 行を出します。数字は「可能性」であって証明ではなく、警告は終了コードを変えません。
 
 **keep 列 × 準識別子の導出関係（v0.6.0、plan のみ）。** パックとは独立に、`plan` は keep 列 X と準識別子 Q の全ての組（X ≠ Q・表の列順）をクロスし、両方が空でない行（値の比較はエンジンの `_norm`: NFC＋前後の空白除去）の 1 回のクロス集計から双方向を評価します。`reveals_qi` ＝ keep 列が生の準識別子の値をほぼ決める（X はそのまま出るので Q を一般化しても隠せない）。`implied_by_qi` ＝ 準識別子の値が keep 列の値をほぼ決める。方向ごとに、s ＝ 比較レコード数、m ＝ ソースの異なる値の数、v ＝ ソースの値では 1 つの値に定まらないレコード数（s − 各グループの最大 target 計数の和）として、s < 50 なら `unchecked`、どちらかの列が一定か s − m = 0（ソースが一意・単なる一意性で関係ではない）なら `trivial`、s ≥ 50 かつ s − m > 0 かつ 100·v ≤ s かつ 10·v ≤ s − m なら `flagged`、それ以外は `clear`。閾値（50・1%・10%）と `PAIR_LIMIT = 400` はコード内定数で、上限を超えた組は `skipped_pairs` に数えて打ち切ります。flagged は stderr の `  - derived: …` 行（ヒントパックの所見の直後・自分の見出しなし・`--quiet` で抑制）と `warnings` 要素 `{code: "derived", column, declared_role, qi_column, relation, support, violations}` になり、findings のトップレベルには `derived_summary = {pairs, skipped_pairs, unchecked, trivial, flagged, clear}` が加わり、不変条件 `unchecked + trivial + flagged + clear = 2 × (pairs − skipped_pairs)` が常に成り立ちます。分析はパックの有無に関係なく動き（パックなしの状態では findings JSON は `packs: []` / `pack_info: []` ＋ 導出結果）、`--no-derived` で導出の痕跡が全て消えます。列名と件数のみで、セルの値は一切出ません。
 
-所見は集計値と列名のみで、**セルの値は一切出ません**。`findings.packs` は従来どおりパック id の配列（読み手は不変）。トップレベルの `pack_info` が読み込み順に `{id, version, source, sha256}` を並べます（`sha256` は読み込んだバイト列そのもの・組み込みは文字列定数の UTF-8 バイト列のハッシュ・`version` がないパックは `null`）。`inspect` と `plan` は先頭に読み込んだパックを示す 1 行を出します（plan の `--quiet` では出ず、パックなしでは出ません）。走査時の警告は 4 つです: `role_mismatch`（`qi` を提案された列が name+value/value 証拠で `keep`/`sensitive` 宣言されている）、`mixed_form`（全角・半角の混在・NFC は折りたたまないため別の群れになる）、`japanese_era`（和暦形式の値）、そして plan のみ `leak`（上記）。組み込み `jp-basic` パック（version 1.1.0）は郵便番号（`prefix` length 4）、生年月日（`#{4}-#{2}-#{2}` → `qi` と `type: date` を提案・v0.6.0）、電話/マイナンバー/メール/カードの漏洩検査、47 都道府県の `category` 階層（パック内に地方区分の基準を 1 つ固定: 三重 = 近畿・新潟 = 中部）、年齢をカバーします。
+所見は集計値と列名のみで、**セルの値は一切出ません**。`findings.packs` は従来どおりパック id の配列（読み手は不変）。トップレベルの `pack_info` が読み込み順に `{id, version, source, sha256}` を並べます（`sha256` は読み込んだバイト列そのもの・組み込みは文字列定数の UTF-8 バイト列のハッシュ・`version` がないパックは `null`）。`inspect` と `plan` は先頭に読み込んだパックを示す 1 行を出します（plan の `--quiet` では出ず、パックなしでは出ません）。走査時の警告は 4 つです: `role_mismatch`（`qi` を提案された列が name+value/value 証拠で `keep`/`sensitive` 宣言されている）、`mixed_form`（全角・半角の混在・NFC は折りたたまないため別の群れになる）、`japanese_era`（和暦形式の値）、そして plan のみ `leak`（上記）。組み込み `jp-basic` パック（v0.7.1 から version 1.2.0）は郵便番号（`prefix` length 4）、生年月日（`#{4}-#{2}-#{2}` → `qi` と `type: date` を提案・v0.6.0）、氏名カナ列（`jp-name-kana`・列名のみで `role: id` を提案 — 直接識別子の扱い・v0.7.1）、電話/マイナンバー/メール/カードの漏洩検査、47 都道府県の `category` 階層（パック内に地方区分の基準を 1 つ固定: 三重 = 近畿・新潟 = 中部）、年齢をカバーします。
 
 **`packs/` ディレクトリ（v0.6.0、v0.6.2 から市区町村版を配布）。** wheel とは別に配布するパックは `packs/` に置きます。`packs/` も `tools/` もパッケージには含まれません（wheel は `sieve_crowd` パッケージのみ）。`jp-municipality-2026` パックは `tools/make_municipality_pack.py` で生成し、ツールはヘッダで入力契約を自動判別します: デジタル庁「アドレス・ベース・レジストリ」の都道府県マスター（`lg_code` / `pref`・それ以外の列は無視・コードは先頭 5 桁が `000` で終わる都道府県レベルのもののみ、違反は終了コード 2）か、総務省の全国地方公共団体コード（`団体コード` / `都道府県名` / `市区町村名`）。両方のコード列があれば曖昧として拒否します。入力 1 個で 3 ルール、入力 2 個 — 都道府県ソースと市区町村ソースを各 1 つずつ・順序不問 — は 4 ルールへマージされ（2 つのコード ルールは両ソースの和集合・名前ルールはソースごと）、マージ出力は入力順に依存しません。同じ契約の 2 個や 3 個以上の入力は終了コード 2。`--pack-version` でパックに書き込む版を指定します（既定 1.0.0）。標準ライブラリのみ・同じ入力ならバイト同一の決定論的な出力（値リストは昇順・キー順固定・2 スペース）、全く同じ行の重複は統合し（ソースをまたぐ場合も・内容が異なる重複は終了コード 2）、契約違反（列名の不一致・6 桁でないコード・都道府県モードで都道府県レベルでないコード・内容の異なる重複・空の名称）は列名と行番号だけ示して終了コード 2（セルの値は出ません）。ルール（`jp-municipality-code` 6 桁 → prefix 5 を提案・`jp-municipality-code5` 5 桁 → prefix 2 を提案・`jp-prefecture-name` と `jp-municipality-name` → category を提案）は組み込みと共存でき（id の衝突なし）`parse_config` を通ります。市区町村版はリポジトリに同梱（パック 1.1.0）: `packs/mt_pref_all.csv`（ABR 47 行の抽出・コミット時に改行を CRLF → LF へ正規化）、`packs/soumu_city_r611.csv`（総務省 1,747 行の抽出・基準日 R6.1.1 = 2024-01-01・受領 xlsx からシートの 47 都道府県行を除いて変換）と生成済み `packs/jp-municipality-2026.json`。同梱 2 抽出からの `--pack-version 1.1.0` 再生成は同梱パックとバイト一致します（T29）。両出典とも PDL 1.0（総務省はサイト表示に公共データ利用規約第1.0版を適用と明記）で、必要な出典表記（出典明記＋加工の明示、ロゴ不使用）は packs/README.md に記録。町字レベルのマスター（156 MB）と総務省の政令指定都市シートは同梱しません。
 
@@ -231,6 +236,14 @@ JSON／XML に対して指定すると拒否されます。
 **findings**（`--findings-json`）: 既存の findings とは別のファイルで、`{"audit": {...}}` の形。`schema: 1` と固定のキー集合 — トップレベルは `schema, rows, k, qi, classes, qi_columns, subject, warnings`。集計と列名のみを運び、**セルの値は一切含みません（subject の値も含む）**（T37）。plan の findings と同じく、原子的かつ無条件に書き換えます。
 
 **範囲の注記。** エントロピーはありません: 対数は出力に浮動小数点を持ち込み、浮動小数点は環境によって末尾の桁が変わることがあります。整数は変わりません。再現性を実測してから、別の版で判断します。`l` は構文解析されますが、audit の項目では使いません（l/t の観測は範囲外）。audit モジュールは audit ハンドラだけが import し、`run`・`plan`・`inspect` は決して import しません（T38 が subprocess の検査を拡張。凍結された `config.py` / `engine.py` は無変更で、その sha256 を T38 が固定します）。実測（依頼書 4.6 節）: 10 万行 × QI 4 列で、subject なしで約 0.4 秒、ありで約 0.6 秒（ラップトップ級 CPU。列を外す B の反復はおよそ O(#QI × n) を追加）。
+
+## 14. 共有の文字表と不可視文字の観測（v0.7.1）
+
+**文字表。** `sieve_crowd/chartable_v1.json` は、Sieve Lens の正本の文字表のバイト完全な複製です（正本は Lens が持ち、Crowd は sha256 `c5ae4757…e605` で固定された複製として扱います。読み込みのたびに再検証します）。内容を変えたい場合は設計側に相談するのであって、Crowd 側で独自に変えません。`sieve_crowd/chartable.py` はそこから 2 つの固定の置換マップを作り（基本 = 不可視文字の除去・twins・全角 ASCII 範囲・折りたたみ空白、および基本＋ダッシュ）、`fold(text, dashes=False)` を提供します。適用順は: (1) 不可視文字（4 種すべて）を取り除く、(2) twins と全角 ASCII 範囲（U+FF01〜U+FF5E → U+0021〜U+007E）を置き換える、(3) 折りたたみ空白（U+00A0・U+3000）を ASCII の空白にする、(4) `dashes=True` のときだけ折りたたみダッシュ（U+2010〜U+2015・U+2212・U+30FC・U+FF70）を ASCII のハイフンにする。4 段階はコードポイントを共有せず（読み込み時に検証）、ターゲットはすべて印字可能 ASCII なので、fold は冪等で印字可能 ASCII はすべて不変 — 純 ASCII の入力は自分自身に折りたたまれます。**fold の中に Unicode データベースの参照は一切ありません**: 同じ入力はどの Python のビルドでも同じ出力に折りたたまれます（結果を決めるのは表の版であって、実行環境の Unicode データではない）。表は遅延で 1 回だけ読み、欠損・改ざん・形式不良は明確な `ChartableError` — 黙って別の表を使うことはありません。wheel は `package-data` で JSON を同梱します（実ビルドで確認）。`run` はこのモジュールに到達しません（至る所が関数レベル import。T46 の subprocess 検査が chartable と hidden_chars をカバーします）。
+
+**不可視文字の観測（plan のみ）。** パックとは独立に、`plan` はすべての列のすべてのセル — plan が既に読む行なので、plan の `max_rows` が唯一の上限 — を文字表の `invisible` の種類（ゼロ幅 U+200B/200C/200D/2060/FEFF・双方向制御・タグ文字・異体字選択子）で走査します。列ごとに `rows`（1 文字以上を含む行数）・`chars`（総数）・`kinds`（現れた種類のソート済みの名前）を記録します。宣言された役割が `keep`・`qi`・`sensitive` で `rows > 0` の列に 1 件ずつ、列名のソート順で警告を出します。`id` と `drop` の列は要約の件数にのみ入ります（値がそのまま出力に残らないか、捨てられるため）。これは観測であって変更ではありません。セルは 1 つも書き換えず、出力は件数と種類の名前のみ — **セルの値もコードポイントも一切現れません**（T45 は不可視文字入りの番兵を使います）。ファイル先頭の BOM は読み込み側（`utf-8-sig`）で解釈されて数えず、セルの中の U+FEFF は数えます。
+
+警告行は従来の `  - code: …` 書式（英日）です。keep の例: `  - hidden_chars: "memo" (declared keep): 12 row(s) contain invisible characters (zero_width); they stay in the output` / 「memo」（宣言 keep）: 12 行に不可視文字（zero_width）が含まれています。出力にそのまま残ります。 `qi` では観測の意味を述べる文に変わります: `values that look identical form separate groups` / 見た目が同じ値が別のグループに分かれます（`keep`/`sensitive` は「出力にそのまま残ります」）。findings JSON は `warnings` 要素 `{code: "hidden_chars", column, declared_role, rows, chars, kinds}` とトップレベルの `hidden_chars_summary = {columns_checked, columns_flagged}` を加えます — キーの追加のみ（追加のみの契約）。findings が書かれ、走査が実行されたときに付きます。`--no-hidden-chars` は観測全体を省きます（行も要素も要約も出ません）。純 ASCII のセルは `isascii()` の高速経路を通ります。10 万行 × 10 列での費用はリリース報告に実測値があります。
 
 ## 付録　独自に決めたこと
 
@@ -257,3 +270,5 @@ JSON／XML に対して指定すると拒否されます。
 | — | XML のフィールドは `name` 属性を持つ。DOCTYPE と名前空間は全面拒否 | 列名は任意の文字列（要素名にはできない）であり、プライバシーの道具がエンティティ展開する入力を解釈してはならない |
 | — | 欠損はどの形式でも空のセル（`null` → `""`、空要素 → `""`） | 往復が安定し、出力が `null` を作らない |
 | — | 形式非依存性をテストされた不変条件にする | 保証が、表を運んだ形式に依存してはならない |
+| — | 文字の折りたたみは固定の表（sha256 固定の Lens 複製）であって、Unicode データベースの呼び出しではない | 同じ入力はどの Python でも同じ出力に折りたたまれる。基準は「探す」のでなく「持つ」 |
+| — | 不可視文字は書き換えず観測する（plan・件数のみ） | 除去はデータの書き換えになる。意味のある場所（keep/qi/sensitive）に警告するのが誠実な半分 |
