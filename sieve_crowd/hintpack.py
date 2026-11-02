@@ -19,6 +19,17 @@ The matching vocabulary is a closed set:
 * ``set`` / ``range`` / ``check`` (``luhn`` · ``my_number`` · ``email_shape``)
   — evaluations that return three values: **match / mismatch / cannot-check**.
 
+Since v0.7.1 the value inputs are folded through the shared chartable
+(``chartable.fold``) before matching: ``value_shape`` and the leak scan fold
+with ``dashes=True`` (shape matching — the long-vowel mark and the other
+folding dashes become ``-``), the value checks fold with ``dashes=False``.
+The fold is a fixed mapping, so pure-ASCII input is unchanged and the match
+results stay byte-identical there; full-width digits, full-width symbols,
+long-vowel dashes and invisible characters now reach the matchers (the v0.5.2
+"full-width never matches" limitation is resolved).  Column names keep their
+NFKC normalization (unchanged, Unicode-database dependent by design decision
+of v0.5.0).
+
 Findings carry aggregates and column names only — **no cell value ever appears**
 in a finding, a warning, or a suggestion.  Candidate lists are ordered by
 contract, not by load order or by the order rules appear in a pack: evidence
@@ -504,8 +515,11 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
     ``cfg_roles`` maps column -> declared role value (``id``/``qi``/...); pass
     ``None`` for ``inspect`` (no config yet) to suppress ``role_mismatch``.
     Cell values are never placed in the returned findings — only aggregates,
-    column names, and rule ids.
+    column names, and rule ids.  Values are folded through the shared chartable
+    before matching (function-level import: the fold's table must never load
+    from ``run``, which does not reach this module anyway).
     """
+    from .chartable import fold
     pos = {h: i for i, h in enumerate(header)}
     packs_list = [p.id for p in packs]
     cols: dict[str, ColumnFindings] = {h: ColumnFindings() for h in header}
@@ -527,13 +541,18 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
         if leak_target and cfg_roles is not None:
             cf.declared_role = cfg_roles.get(name)
         # a plain-digit cell is its own single token (skips the regex scan);
-        # oversized cells are skipped regardless of shape
-        cell_tokens = [
-            None if len(v) > MAX_CELL_CHARS
-            else (v,) if (v.isascii() and v.isdigit())
-            else tuple(_TOKENS.findall(v))
-            for v in nonempty
-        ] if leak_target else ()
+        # oversized cells are skipped regardless of shape.  v0.7.1: the cell is
+        # folded (dashes=True — shape matching) before tokenizing, so full-width
+        # digits and long-vowel dashes form tokens too.
+        def _cell_tokens(v: str):
+            fv = fold(v, dashes=True)
+            if len(fv) > MAX_CELL_CHARS:
+                return None
+            if fv.isascii() and fv.isdigit():
+                return (fv,)
+            return tuple(_TOKENS.findall(fv))
+
+        cell_tokens = [_cell_tokens(v) for v in nonempty] if leak_target else ()
         if leak_target:
             uniq_tokens = {t for tokens in cell_tokens if tokens for t in tokens}
             n_checked = sum(1 for t in cell_tokens if t is not None)
@@ -550,9 +569,10 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
                 # record keeps its v0.5.0 condition (a signal must exist).
                 if name_match or not rule.leak:
                     shape_match = rule.shape is not None and any(
-                        rule.shape.match(v) for v in nonempty)    # type: ignore[union-attr]
+                        rule.shape.match(fold(v, dashes=True)) for v in nonempty)   # type: ignore[union-attr]
                     check_match = rule.check is not None and any(
-                        _eval_check(rule.check, v) == "match" for v in nonempty)   # type: ignore[union-attr]
+                        _eval_check(rule.check, fold(v, dashes=False)) == "match"
+                        for v in nonempty)   # type: ignore[union-attr]
                 else:
                     shape_match = check_match = False
                 value_signal = shape_match or check_match
@@ -573,7 +593,7 @@ def scan(header: Sequence[str], rows: Sequence[Sequence[str]],
                 if rule.check is not None and (name_match or value_signal):
                     agg = {"match": 0, "mismatch": 0, "cannot_check": 0}
                     for v in values:
-                        agg[_eval_check(rule.check, v)] += 1
+                        agg[_eval_check(rule.check, fold(v, dashes=False))] += 1
                     cf.checks.append({"pack": pack.id, "rule": rule.id,
                                       "kind": rule.check.kind, **agg})   # type: ignore[union-attr]
 

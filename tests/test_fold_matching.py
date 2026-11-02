@@ -67,16 +67,18 @@ class T42FoldedMatching(unittest.TestCase):
             cands = {(c["rule"], c["evidence"]) for c in f["columns"]["zip"]["candidates"]}
             self.assertIn(("jp-zip", "name+value"), cands)
 
-    def test_fullwidth_zip_in_prose_is_found_by_leak(self):
+    def test_fullwidth_phone_in_prose_is_found_by_leak(self):
+        # the SPEC-documented constraint "full-width digits and dashes never
+        # form a token" is resolved: the cell is folded before tokenizing
         with tempfile_dir() as d:
             rc, _, err, f = _plan(
-                d, "memo,age\n\u3012\uff11\uff12\uff13\uff0d\uff14\uff15\uff16\uff17\u3067\u3059,40\n".encode(),
+                d, "memo,age\n\uff10\uff19\uff10\uff0d\uff11\uff12\uff13\uff14\uff0d\uff15\uff16\uff17\uff18\u3067\u3059,40\n".encode(),
                 _cfg(memo=KEEP, age=QI))
             self.assertEqual(rc, 0, err)
             leaks = f["columns"]["memo"]["leaks"]
-            self.assertEqual([(l["pack"], l["rule"], l["count"]) for l in leaks],
-                             [("jp-basic", "jp-zip", 1)])
-            self.assertIn("jp-basic/jp-zip", err)
+            self.assertEqual([(l["rule"], l["count"]) for l in leaks],
+                             [("jp-phone", 1)])
+            self.assertIn("jp-basic/jp-phone", err)
 
     def test_long_vowel_phone_in_prose_is_found_by_leak(self):
         with tempfile_dir() as d:
