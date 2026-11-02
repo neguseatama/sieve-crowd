@@ -15,10 +15,12 @@ T27 pins the generated municipality-mode pack (deterministic bytes,
 validity, uniqueness, the 5-digit = first-5-of-6 relationship, no id clash
 with the builtin, suggests that pass ``parse_config``); T28 pins the input
 checks (exit code 2 without cell values).  T29 (v0.6.1) pins the prefecture
-mode (rules, the prefecture-level ``000`` guard, the ambiguous header), the
-committed pack (regenerating from the committed extract reproduces the
-committed bytes; the pack content: 47 codes / 47 code5 / 47 names, all
-prefecture-level) and the PDL 1.0 attribution in ``packs/README.md``.
+mode (rules, the prefecture-level ``000`` guard, the ambiguous header); since
+v0.6.2 it also pins the committed pack, which is the merged municipality
+edition (pack 1.1.0: regenerating from the two committed extracts reproduces
+the committed bytes; content: 1,794 codes / 1,794 code5 / 47 prefecture names
+/ 1,714 municipality names) and the attribution for both sources in
+``packs/README.md``.
 
 The classes skip when the tool or the ``packs/`` files are absent (an sdist
 ships the tests but neither ``tools/`` nor ``packs/``; from a repository
@@ -28,6 +30,7 @@ Test-number note: the v0.6.0 request named its block T25/T26; it was shifted
 to T27/T28 because T20/T21 were already taken by v0.5.2.  T29 continues the
 sequence in v0.6.1.
 """
+import csv
 import json
 import os
 import subprocess
@@ -229,6 +232,7 @@ PREF_ROWS = [
     ("470007", "沖縄県", "オキナワケン", "Okinawa", "1947-04-17", "", ""),
 ]
 PREF_CSV_SOURCE = REPO / "packs" / "mt_pref_all.csv"
+MUNI_CSV_SOURCE = REPO / "packs" / "soumu_city_r611.csv"
 PREF_PACK = REPO / "packs" / "jp-municipality-2026.json"
 PACKS_README = REPO / "packs" / "README.md"
 
@@ -240,9 +244,10 @@ def _pref_csv(rows=PREF_ROWS, header=PREF_HEADER) -> bytes:
 @unittest.skipUnless(TOOL.exists(),
                      "the generator ships with the repository, not the sdist")
 class T29PrefectureModeAndCommittedPack(unittest.TestCase):
-    """T29 (v0.6.1): the prefecture mode (lg_code/pref), the committed pack
-    (byte-identity with a regeneration from the committed extract) and the
-    PDL 1.0 attribution in packs/README.md."""
+    """T29 (v0.6.1): the prefecture mode (lg_code/pref); since v0.6.2 the
+    committed pack is the merged municipality edition (pack 1.1.0), pinned by
+    byte-identity with a regeneration from the two committed extracts and by
+    its content; plus the attribution in packs/README.md."""
 
     @unittest.skipUnless(TOOL.exists(),
                          "the generator ships with the repository, not the sdist")
@@ -295,38 +300,52 @@ class T29PrefectureModeAndCommittedPack(unittest.TestCase):
         self.assertNotIn("010006", err)
 
     @unittest.skipUnless(TOOL.exists() and PREF_CSV_SOURCE.exists()
-                         and PREF_PACK.exists(),
+                         and MUNI_CSV_SOURCE.exists() and PREF_PACK.exists(),
                          "the generator and the committed packs/ files ship "
                          "with the repository, not the sdist")
     def test_committed_pack_matches_regeneration(self):
-        r = _run([str(PREF_CSV_SOURCE)])
+        args = ["--pack-version", "1.1.0"]
+        r = _run([str(PREF_CSV_SOURCE), str(MUNI_CSV_SOURCE)] + args)
         self.assertEqual(r.returncode, 0, r.stderr)
+        r_swapped = _run([str(MUNI_CSV_SOURCE), str(PREF_CSV_SOURCE)] + args)
+        self.assertEqual(r_swapped.returncode, 0, r_swapped.stderr)
+        self.assertEqual(r.stdout, r_swapped.stdout)   # input order independent
         with open(PREF_PACK, "rb") as fh:
             committed = fh.read()
         self.assertEqual(committed, r.stdout)      # byte-identical regeneration
 
-    @unittest.skipUnless(PREF_PACK.exists(),
-                         "the committed pack ships with the repository, not the sdist")
-    def test_committed_pack_pins_the_prefecture_edition(self):
+    @unittest.skipUnless(PREF_PACK.exists() and MUNI_CSV_SOURCE.exists(),
+                         "the committed packs/ files ship with the repository, "
+                         "not the sdist")
+    def test_committed_pack_pins_the_municipality_edition(self):
         with open(PREF_PACK, "rb") as fh:
             pack = load_pack_bytes(fh.read(), source="<committed>", origin="file")
         self.assertEqual(pack.id, "jp-municipality-2026")
-        self.assertEqual(pack.version, "1.0.0")
+        self.assertEqual(pack.version, "1.1.0")
         self.assertEqual([rule.id for rule in pack.rules],
                          ["jp-municipality-code", "jp-municipality-code5",
-                          "jp-prefecture-name"])
+                          "jp-prefecture-name", "jp-municipality-name"])
         rules = {rule.id: rule for rule in pack.rules}
         codes = sorted(rules["jp-municipality-code"].check.values)
         code5 = sorted(rules["jp-municipality-code5"].check.values)
-        names = sorted(rules["jp-prefecture-name"].check.values)
-        self.assertEqual(len(codes), 47)                       # 47 prefectures
+        pref_names = sorted(rules["jp-prefecture-name"].check.values)
+        muni_names = sorted(rules["jp-municipality-name"].check.values)
+        self.assertEqual(len(codes), 1794)                     # 47 + 1747
         self.assertEqual(len(set(codes)), len(codes))          # unique
         self.assertTrue(all(len(c) == 6 and c.isdigit() for c in codes))
         self.assertTrue(all(1 <= int(c[:2]) <= 47 for c in codes))   # 01..47
-        self.assertEqual(len(code5), 47)
-        self.assertTrue(all(c.endswith("000") for c in code5))       # prefecture level
-        self.assertEqual(len(names), 47)
-        self.assertEqual(len(set(names)), len(names))
+        self.assertEqual(len(code5), 1794)                     # all distinct
+        self.assertEqual(len([c for c in code5 if c.endswith("000")]), 47)
+        self.assertEqual(len(pref_names), 47)
+        self.assertEqual(len(set(pref_names)), len(pref_names))
+        self.assertEqual(len(muni_names), 1714)                # 府中市 etc. collapse
+        # the committed municipality extract carries exactly these rows
+        with open(MUNI_CSV_SOURCE, encoding="utf-8", newline="") as fh:
+            rows = list(csv.reader(fh))
+        self.assertEqual(len(rows), 1748)                      # header + 1747
+        self.assertEqual(rows[0],
+                         ["団体コード", "都道府県名", "市区町村名",
+                          "都道府県名（カナ）", "市区町村名（カナ）"])
         for rule in pack.rules:          # every suggest passes parse_config
             spec = {k: v for k, v in rule.suggest.items() if k != "role"}
             cfg = parse_config({"k": 2, "columns": {
@@ -342,7 +361,11 @@ class T29PrefectureModeAndCommittedPack(unittest.TestCase):
                 "public_data_license_v1.0",       # PDL 1.0 license URL
                 "PDL 1.0",                        # the license name
                 "加工・作成",                       # the edited-data statement (1.1)
-                "sieve-crowd"):                   # the entity that edited it
+                "sieve-crowd",                    # the entity that edited it
+                "soumu.go.jp/denshijiti",         # the 総務省 source page (v0.6.2)
+                "menu_kyotsuu/policy/tyosaku",    # the 総務省 site policy (PDL 1.0)
+                "000925835",                      # the obtained 総務省 xlsx
+                ):
             self.assertIn(needle, text)
 
 
