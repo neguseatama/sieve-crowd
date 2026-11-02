@@ -39,7 +39,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae040061500e"
 TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159"
 TEMPLATE_SHA2 = "4d8db025feae99273c9d4d22bea4af6b937d010d238eb7ad164eecaf6de47ae6"
-BUILTIN_PACK_SHA = "ec6aceea5fc2a735cbb7cf43bc769858b3fa679c04ad675b9b13031ff21d215c"
+# jp-basic 1.2.0 (v0.7.1: jp-name-kana added) — re-measured from the bytes.
+BUILTIN_PACK_SHA = "e863edfcb7597882098b300d7bd7a7a98c185af57bd8a21296bdc7a0f0cab291"
 # The frozen cores: byte-for-byte, nothing in v0.7.0 may edit them.
 CONFIG_PY_SHA = "3fc0b1f9e95b7f05c88b4bf00f37faa6f529fd9e1c3fa000c54c137bd16d3a3d"
 ENGINE_PY_SHA = "d7384c5eb5c6012f731ab9af04e0483ca92316b6b73b980f4a88a3541616dc5d"

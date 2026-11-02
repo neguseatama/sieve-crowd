@@ -77,8 +77,9 @@ class T47JpNameKana(unittest.TestCase):
                          for c in f["columns"][col]["candidates"]]
                 self.assertIn(("jp-basic", "jp-name-kana", "name", {"role": "id"}),
                               cands, col)
-            # the plain "name" column does not match (kana-specific list)
-            cands = [c["rule"] for c in f["columns"]["name"].get("candidates", [])]
+            # the plain "name" column does not match (kana-specific list); a
+            # column with no pack findings is omitted from the JSON entirely
+            cands = [c["rule"] for c in f["columns"].get("name", {}).get("candidates", [])]
             self.assertNotIn("jp-name-kana", cands)
             # name-only evidence can never produce a role_mismatch
             self.assertNotIn("role_mismatch", err)

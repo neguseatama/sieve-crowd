@@ -37,11 +37,12 @@ assert len(_PREF_TO_REGION) == 47
 _PACK = {
     "schema": 1,
     "id": "jp-basic",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "_comment": (
         "Built-in hints for common Japanese columns. Region classification "
         "follows the 総務省/e-Stat eight-block 地方ブロック grouping: 三重=近畿, "
         "新潟=中部, 長野/岐阜=中部. 1.1.0 adds jp-birthdate (ISO YYYY-MM-DD). "
+        "1.2.0 adds jp-name-kana (kana name columns suggest id). "
         "Hints never affect the run output; edit this pack to change a standard."
     ),
     "rules": [
@@ -74,6 +75,14 @@ _PACK = {
             "when": {"column_names": ["email", "mail", "e-mail", "メール"]},
             "check": {"kind": "email_shape"},
             "leak": True,
+        },
+        {
+            "id": "jp-name-kana",
+            "when": {"column_names": ["furigana", "kana", "name_kana", "last_name_kana",
+                                      "first_name_kana", "フリガナ", "ふりがな", "カナ",
+                                      "氏名カナ", "氏名フリガナ", "姓カナ", "名カナ",
+                                      "姓フリガナ", "名フリガナ"]},
+            "suggest": {"role": "id"},
         },
         {
             "id": "jp-prefecture",
