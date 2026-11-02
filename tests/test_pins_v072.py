@@ -3,10 +3,11 @@
 The run path and the opt-in template are unchanged by the pack work:
 RUN_TABLE_SHA and TEMPLATE_SHA keep their values, ``run`` still imports none
 of the hint/derived/audit machinery, and the four frozen cores stay
-byte-for-byte.  TEMPLATE_SHA2 and BUILTIN_PACK_SHA are re-pinned to jp-basic
-1.3.0 — the jp-person-name and jp-address additions change the pack bytes
-and, through the default-on inspect template (people.csv gains the id
-suggestion on its name column), the template bytes on purpose.
+byte-for-byte.  TEMPLATE_SHA2 and BUILTIN_PACK_SHA carry the latest re-pin (jp-basic 1.4.0,
+v0.7.3; v0.7.2 re-pinned them to 1.3.0 for jp-person-name and jp-address) —
+the pack additions change the pack bytes and, through the default-on inspect
+template (people.csv gains the jp-zip-hyphen candidate on its zip column),
+the template bytes on purpose.
 """
 import contextlib
 import hashlib
@@ -21,13 +22,14 @@ from sieve_crowd.cli import main
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Golden SHAs, re-pinned for v0.7.2 (RUN_TABLE_SHA and TEMPLATE_SHA unchanged).
+# Golden SHAs, re-pinned for v0.7.3 (RUN_TABLE_SHA and TEMPLATE_SHA unchanged).
 RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae040061500e"
 TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159"
-# jp-basic 1.3.0: both pins change on purpose (jp-person-name and jp-address
-# added; the name column of people.csv gains the id suggestion).
-TEMPLATE_SHA2 = "664a19bb8c3a0279eba10e1923ba737817110d88def32c97e966d4c1744ed94b"
-BUILTIN_PACK_SHA = "c62948240bc31e35a5ffbd35ccfe943899e0b82e0ab4dbf857ad76c3135eb02c"
+# jp-basic 1.4.0: both pins change on purpose (id suggestions on the four
+# rules, the requested column names, jp-zip-hyphen; the zip column of
+# people.csv gains the jp-zip-hyphen candidate).
+TEMPLATE_SHA2 = "870a30b80ad93021160c38e38c5c0841234d7dc0035556b9fa5f6703d177d07b"
+BUILTIN_PACK_SHA = "f164af7018e8cfa2d08ead08f79d16b125bda2128c2fc2c30b1918e0812fd235"
 CHARTABLE_SHA = "c5ae4757bc9d07a2dcd1507d662460c3412c932d73318e54912569608242e605"
 # The frozen cores: byte-for-byte, nothing in v0.7.2 may edit them.
 CONFIG_PY_SHA = "3fc0b1f9e95b7f05c88b4bf00f37faa6f529fd9e1c3fa000c54c137bd16d3a3d"
@@ -69,13 +71,13 @@ class T51Pins(unittest.TestCase):
             with open(tpl2, "rb") as fh:
                 self.assertEqual(hashlib.sha256(fh.read()).hexdigest(), TEMPLATE_SHA2)
 
-    def test_builtin_pack_bytes_and_version_are_pinned_to_1_3_0(self):
+    def test_builtin_pack_bytes_and_version_are_pinned(self):
         from sieve_crowd.hintpack import load_packs
         from sieve_crowd.hintpack_builtin import BUILTIN_PACK_BYTES
         self.assertEqual(hashlib.sha256(BUILTIN_PACK_BYTES).hexdigest(),
                          BUILTIN_PACK_SHA)
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.3.0")
+        self.assertEqual(packs[0].version, "1.4.0")
 
     def test_chartable_file_is_pinned(self):
         with open(os.path.join(REPO, "sieve_crowd", "chartable_v1.json"), "rb") as fh:

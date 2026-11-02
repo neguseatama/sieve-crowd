@@ -38,9 +38,10 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Golden SHAs, re-pinned for v0.7.0 (audit must not touch any of these paths).
 RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae040061500e"
 TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159"
-TEMPLATE_SHA2 = "664a19bb8c3a0279eba10e1923ba737817110d88def32c97e966d4c1744ed94b"
-# jp-basic 1.3.0 (v0.7.2: jp-person-name and jp-address added) — re-measured from the bytes.
-BUILTIN_PACK_SHA = "c62948240bc31e35a5ffbd35ccfe943899e0b82e0ab4dbf857ad76c3135eb02c"
+TEMPLATE_SHA2 = "870a30b80ad93021160c38e38c5c0841234d7dc0035556b9fa5f6703d177d07b"
+# jp-basic 1.4.0 (v0.7.3: id suggestions, requested column names, jp-zip-hyphen)
+# — re-measured from the bytes.
+BUILTIN_PACK_SHA = "f164af7018e8cfa2d08ead08f79d16b125bda2128c2fc2c30b1918e0812fd235"
 # The frozen cores: byte-for-byte, nothing in v0.7.0 may edit them.
 CONFIG_PY_SHA = "3fc0b1f9e95b7f05c88b4bf00f37faa6f529fd9e1c3fa000c54c137bd16d3a3d"
 ENGINE_PY_SHA = "d7384c5eb5c6012f731ab9af04e0483ca92316b6b73b980f4a88a3541616dc5d"
