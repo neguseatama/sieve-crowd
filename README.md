@@ -70,7 +70,7 @@ Sieve is a family of engines that share three design principles — deterministi
 - **Receipt for the record**
   A machine-readable receipt records what was done (rules applied, suppression count, measurements). The receipt contains no personal information.
 - **Supported formats**
-  CSV, JSON and XML (UTF-8). Excel is excluded to keep the tool dependency-free.
+  CSV, JSON and XML (UTF-8). Since the tool does not depend on external libraries, Excel remains out of scope for now.
 
 ---
 
