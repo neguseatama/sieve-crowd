@@ -20,7 +20,10 @@ v0.6.2 it also pins the committed pack, which is the merged municipality
 edition (pack 1.1.0: regenerating from the two committed extracts reproduces
 the committed bytes; content: 1,794 codes / 1,794 code5 / 47 prefecture names
 / 1,714 municipality names) and the attribution for both sources in
-``packs/README.md``.
+``packs/README.md``.  T30 (v0.6.2) pins the merged two-source generation
+itself: the four-rule union pack, determinism and input-order independence,
+``--pack-version``, and the new contract errors (two inputs of the same
+contract, more than two inputs, a cross-source conflicting duplicate).
 
 The classes skip when the tool or the ``packs/`` files are absent (an sdist
 ships the tests but neither ``tools/`` nor ``packs/``; from a repository
@@ -28,7 +31,7 @@ checkout they always run).
 
 Test-number note: the v0.6.0 request named its block T25/T26; it was shifted
 to T27/T28 because T20/T21 were already taken by v0.5.2.  T29 continues the
-sequence in v0.6.1.
+sequence in v0.6.1 and T30 in v0.6.2.
 """
 import csv
 import json
@@ -367,6 +370,112 @@ class T29PrefectureModeAndCommittedPack(unittest.TestCase):
                 "000925835",                      # the obtained 総務省 xlsx
                 ):
             self.assertIn(needle, text)
+
+
+M_HEADER = "lg_code,pref"
+M_ROWS = [("010006", "北海道"), ("110001", "埼玉県")]
+C_HEADER = "団体コード,都道府県名,市区町村名"
+C_ROWS = [("011002", "北海道", "札幌市"), ("131016", "東京都", "千代田区")]
+
+
+@unittest.skipUnless(TOOL.exists(),
+                     "the generator ships with the repository, not the sdist")
+class T30MergedGeneration(unittest.TestCase):
+    """T30 (v0.6.2): the merged two-source generation — the four-rule union
+    pack, determinism and input-order independence, ``--pack-version``, and
+    the new contract errors (same contract twice, more than two inputs, a
+    cross-source conflicting duplicate).  Error messages never carry values."""
+
+    def _m(self, d, name="pref.csv", rows=M_ROWS):
+        return _write(d, name, (M_HEADER + "\n"
+                      + "".join(",".join(r) + "\n" for r in rows)).encode("utf-8"))
+
+    def _c(self, d, name="city.csv", rows=C_ROWS):
+        return _write(d, name, (C_HEADER + "\n"
+                      + "".join(",".join(r) + "\n" for r in rows)).encode("utf-8"))
+
+    def test_merged_generation_produces_the_four_rule_union(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = _run([self._m(d), self._c(d)])
+            self.assertEqual(r.returncode, 0, r.stderr)
+        pack = load_pack_bytes(r.stdout, source="<generated>", origin="file")
+        self.assertEqual(pack.id, "jp-municipality-2026")
+        self.assertEqual(pack.version, "1.0.0")            # the default
+        self.assertEqual([rule.id for rule in pack.rules],
+                         ["jp-municipality-code", "jp-municipality-code5",
+                          "jp-prefecture-name", "jp-municipality-name"])
+        rules = {rule.id: rule for rule in pack.rules}
+        codes = sorted(rules["jp-municipality-code"].check.values)
+        code5 = sorted(rules["jp-municipality-code5"].check.values)
+        self.assertEqual(codes, ["010006", "011002", "110001", "131016"])
+        self.assertEqual(code5, ["01000", "01100", "11000", "13101"])
+        # the code rule matches both contracts' columns
+        self.assertIn("lg_code", rules["jp-municipality-code"].column_names)
+        self.assertIn("団体コード", rules["jp-municipality-code"].column_names)
+        self.assertEqual(sorted(rules["jp-prefecture-name"].check.values),
+                         ["北海道", "埼玉県"])
+        self.assertEqual(sorted(rules["jp-municipality-name"].check.values),
+                         ["千代田区", "札幌市"])
+
+    def test_merged_bytes_are_deterministic_and_order_independent(self):
+        with tempfile.TemporaryDirectory() as d:
+            m, c = self._m(d), self._c(d)
+            r1 = _run([m, c])
+            r2 = _run([m, c])
+            r3 = _run([c, m])
+            self.assertEqual(r1.returncode, 0, r1.stderr)
+            self.assertEqual(r3.returncode, 0, r3.stderr)
+            self.assertEqual(r1.stdout, r2.stdout)
+            self.assertEqual(r1.stdout, r3.stdout)
+            v11 = _run([m, c, "--pack-version", "1.1.0"])
+            v11b = _run([c, m, "--pack-version", "1.1.0"])
+            self.assertEqual(v11.returncode, 0, v11.stderr)
+            self.assertEqual(v11.stdout, v11b.stdout)
+        self.assertIn('"version": "1.0.0"', r1.stdout.decode())
+        self.assertIn('"version": "1.1.0"', v11.stdout.decode())
+
+    def test_two_inputs_of_the_same_contract_exit_2(self):
+        with tempfile.TemporaryDirectory() as d:
+            m, c = self._m(d), self._c(d)
+            r = _run([m, self._m(d, name="pref2.csv")])
+            r2 = _run([c, self._c(d, name="city2.csv")])
+        for run in (r, r2):
+            self.assertEqual(run.returncode, 2)
+            err = run.stderr.decode()
+            self.assertIn("the two inputs use the same contract", err)
+        self.assertNotIn("010006", r.stderr.decode())
+        self.assertNotIn("011002", r2.stderr.decode())
+
+    def test_three_inputs_exit_2(self):
+        with tempfile.TemporaryDirectory() as d:
+            m, c = self._m(d), self._c(d)
+            r = _run([m, c, m])
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("expected one or two inputs (found 3)", r.stderr.decode())
+
+    def test_cross_source_conflicting_duplicate_exits_2(self):
+        with tempfile.TemporaryDirectory() as d:
+            m = self._m(d)
+            c = self._c(d, rows=[("010006", "北海道", "哨兵市")])
+            r = _run([m, c])
+        self.assertEqual(r.returncode, 2)
+        err = r.stderr.decode()
+        self.assertIn("the same code appears twice with different details", err)
+        self.assertIn("(input 2, row 2)", err)
+        self.assertNotIn("010006", err)
+        self.assertNotIn("哨兵市", err)
+
+    def test_cross_source_identical_duplicate_collapses(self):
+        with tempfile.TemporaryDirectory() as d:
+            m = self._m(d)
+            c = self._c(d, rows=[("010006", "北海道", "北海道"),
+                                 ("011002", "北海道", "札幌市")])
+            r = _run([m, c])
+            self.assertEqual(r.returncode, 0, r.stderr)
+        pack = load_pack_bytes(r.stdout)
+        codes = next(rule for rule in pack.rules
+                     if rule.id == "jp-municipality-code").check.values
+        self.assertEqual(sorted(codes), ["010006", "011002", "110001"])
 
 
 if __name__ == "__main__":
