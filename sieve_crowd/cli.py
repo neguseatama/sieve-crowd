@@ -114,6 +114,24 @@ def _parser() -> argparse.ArgumentParser:
     pl.add_argument("--findings-json", metavar="FILE",
                     help="write the hint-pack and derived findings (aggregates only, "
                          "never cell values) as JSON")
+
+    au = sub.add_parser("audit", help="observe the table as it is: classes, per-QI columns and "
+                                      "repeated subjects (integers only; nothing searched or written)")
+    au.add_argument("input")
+    au.add_argument("-c", "--config", required=True)
+    au.add_argument("--subject", metavar="COLUMN",
+                    help="the column that says who is who (name, customer id, ...); repeats "
+                         "are observed on it. A configured column with a role other than "
+                         "qi/sensitive is required")
+    au.add_argument("--delimiter", help="CSV only")
+    au.add_argument("--in-format", choices=FORMATS,
+                    help="force the input format (default: from the file extension)")
+    au.add_argument("--lang", choices=["en", "ja"], default="en")
+    au.add_argument("--max-rows", type=int, default=200_000)
+    au.add_argument("--max-evals", type=int, default=20_000)
+    au.add_argument("--findings-json", metavar="FILE",
+                    help="write the audit observation (aggregates only, never cell values) as JSON")
+    au.add_argument("--quiet", action="store_true")
     return p
 
 
@@ -239,8 +257,13 @@ def _cmd_keygen(a: argparse.Namespace) -> int:
 def _load_config(a: argparse.Namespace):
     with open(a.config, "rb") as fh:
         raw = json.loads(fh.read().decode("utf-8-sig"))
-    key = parse_key(open(a.key_file, encoding="utf-8").read()) if a.key_file else None
-    return parse_config(raw, k=a.k, l=a.l, max_suppression=a.max_suppression,
+    key_file = getattr(a, "key_file", None)
+    key = parse_key(open(key_file, encoding="utf-8").read()) if key_file else None
+    # audit's parser carries no k/l/max-suppression overrides: the config file
+    # is the single source there.  getattr keeps that optional (None overrides
+    # are ignored by parse_config); run/plan are unaffected.
+    return parse_config(raw, k=getattr(a, "k", None), l=getattr(a, "l", None),
+                        max_suppression=getattr(a, "max_suppression", None),
                         missing_value_policy=getattr(a, "missing_value_policy", None),
                         shuffle=not getattr(a, "keep_order", False),
                         shuffle_seed=getattr(a, "shuffle_seed", 0), lang=a.lang,
@@ -393,6 +416,46 @@ def _cmd_plan(a: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_audit(a: argparse.Namespace) -> int:
+    try:
+        in_fmt = _resolve_format(a.input, a.in_format, dash_default="csv")
+        delim = _delimiter(a.delimiter, {in_fmt})
+    except InputError as exc:
+        print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    try:
+        cfg = _load_config(a)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        print("error: the configuration is not valid JSON", file=sys.stderr); return EXIT_CONFIG
+    except OSError as exc:
+        print(f"error: cannot read the configuration or key ({exc.strerror})", file=sys.stderr); return EXIT_IO
+    try:
+        header, rows = read_any(_read(a.input), in_fmt, delim)
+    except InputError as exc:
+        print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    except OSError as exc:
+        print(f"error: cannot read the input ({exc.strerror})", file=sys.stderr); return EXIT_IO
+    # v0.7.0: audit is imported here only - run/plan/inspect never pull it in.
+    from .audit import audit_table, report_text, validate_subject
+    try:
+        validate_subject(cfg, a.subject)
+        result = audit_table(header, rows, cfg, subject=a.subject)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    if not a.quiet:
+        print(report_text(result, cfg.lang, max_rows=cfg.max_rows), file=sys.stderr)
+    if a.findings_json:
+        try:
+            _atomic_write(a.findings_json,
+                          (json.dumps({"audit": result}, ensure_ascii=False, indent=2,
+                                      sort_keys=True) + "\n").encode("utf-8"))
+        except OSError as exc:
+            print(f"error: cannot write ({exc.strerror})", file=sys.stderr); return EXIT_IO
+    return EXIT_OK
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     a = _parser().parse_args(argv)
-    return {"inspect": _cmd_inspect, "keygen": _cmd_keygen, "run": _cmd_run, "plan": _cmd_plan}[a.cmd](a)
+    return {"inspect": _cmd_inspect, "keygen": _cmd_keygen, "run": _cmd_run,
+            "plan": _cmd_plan, "audit": _cmd_audit}[a.cmd](a)
