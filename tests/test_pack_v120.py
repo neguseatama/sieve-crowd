@@ -5,8 +5,9 @@ condition): kana name columns — furigana/kana/name_kana/last_name_kana/
 first_name_kana/フリガナ/ふりがな/カナ/氏名カナ/氏名フリガナ/姓カナ/名カナ/
 姓フリガナ/名フリガナ — suggest ``role: id`` (the treatment the direct-
 identifier hint tradition uses).  The evidence is the ``name`` stage only, so
-``role_mismatch`` can never fire for it.  The pack version is 1.2.0 and its
-bytes are re-pinned (BUILTIN_PACK_SHA changes on purpose).
+``role_mismatch`` can never fire for it.  The pack version is 1.3.0 since
+v0.7.2 (jp-person-name and jp-address added) and its bytes are re-pinned
+(BUILTIN_PACK_SHA changes on purpose).
 """
 import contextlib
 import io
@@ -19,8 +20,9 @@ from sieve_crowd.cli import main
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# jp-basic 1.2.0 (jp-name-kana added) — the new pin, measured from the bytes.
-BUILTIN_PACK_SHA = "e863edfcb7597882098b300d7bd7a7a98c185af57bd8a21296bdc7a0f0cab291"
+# jp-basic 1.3.0 (jp-person-name and jp-address added) — the pin, re-measured
+# from the bytes.
+BUILTIN_PACK_SHA = "c62948240bc31e35a5ffbd35ccfe943899e0b82e0ab4dbf857ad76c3135eb02c"
 
 
 def call(*argv):
@@ -49,7 +51,7 @@ def _plan(d, csv_data, cfg_data, *extra):
 
 
 class T47JpNameKana(unittest.TestCase):
-    """T47: name-only rule, id suggestion, no role_mismatch, version 1.2.0."""
+    """T47: name-only rule, id suggestion, no role_mismatch, version 1.3.0."""
 
     def test_builtin_pack_version_and_bytes(self):
         from sieve_crowd.hintpack import load_packs
@@ -58,7 +60,7 @@ class T47JpNameKana(unittest.TestCase):
         self.assertEqual(hashlib.sha256(BUILTIN_PACK_BYTES).hexdigest(),
                          BUILTIN_PACK_SHA)
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.2.0")
+        self.assertEqual(packs[0].version, "1.3.0")  # v0.7.2: two rules added
 
     def test_kana_name_columns_suggest_id_with_name_evidence(self):
         csv = ("フリガナ,furigana,name,age\n"

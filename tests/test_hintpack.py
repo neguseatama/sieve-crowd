@@ -24,12 +24,12 @@ RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae040061500
 # v0.4.0 inspect template (--config-out without hint packs). Since v0.5.1 the
 # byte-exact route is reached with --no-builtin-hints (T4/T14); value unchanged.
 TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159"
-# New pin (v0.5.1, updated v0.6.0 for jp-birthdate): the default-on (builtin
-# loaded) inspect template, people.csv.
-TEMPLATE_SHA2 = "4d8db025feae99273c9d4d22bea4af6b937d010d238eb7ad164eecaf6de47ae6"
-# New pin (v0.5.1, updated v0.6.0 for jp-birthdate, v0.7.1 for jp-name-kana):
-# the builtin jp-basic 1.2.0 pack bytes.
-BUILTIN_PACK_SHA = "e863edfcb7597882098b300d7bd7a7a98c185af57bd8a21296bdc7a0f0cab291"
+# New pin (v0.5.1, updated v0.6.0 for jp-birthdate, v0.7.2 for jp-person-name
+# and jp-address): the default-on (builtin loaded) inspect template, people.csv.
+TEMPLATE_SHA2 = "664a19bb8c3a0279eba10e1923ba737817110d88def32c97e966d4c1744ed94b"
+# New pin (v0.5.1, updated v0.6.0 for jp-birthdate, v0.7.1 for jp-name-kana,
+# v0.7.2 for jp-person-name and jp-address): the builtin jp-basic 1.3.0 pack bytes.
+BUILTIN_PACK_SHA = "c62948240bc31e35a5ffbd35ccfe943899e0b82e0ab4dbf857ad76c3135eb02c"
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -688,7 +688,7 @@ class T18PackInfo(unittest.TestCase):
             self.assertEqual([p["id"] for p in info], ["jp-basic", "mypack"])  # load order
             b = info[0]
             self.assertEqual(b["source"], "builtin")
-            self.assertEqual(b["version"], "1.2.0")     # v0.7.1: jp-name-kana added
+            self.assertEqual(b["version"], "1.3.0")     # v0.7.2: jp-person-name and jp-address added
             self.assertEqual(set(b), {"id", "version", "source", "sha256"})
             m = info[1]
             self.assertEqual(m["source"], "file")
@@ -932,10 +932,11 @@ class T20CandidateOrder(unittest.TestCase):
 class T26JpBirthdate(unittest.TestCase):
     """T26 (v0.6.0): the builtin jp-basic pack gains the jp-birthdate rule
     (column names + the ``#{4}-#{2}-#{2}`` shape, suggest role qi type date)
-    and is versioned 1.2.0 since v0.7.1 (jp-name-kana added).  The detection
-    mechanism is the existing one (a name match or one shape-matching cell —
-    the same any-1-cell signal every other suggest rule uses); the pack bytes
-    and the default-on template get their own sha256 pins."""
+    and is versioned 1.3.0 since v0.7.2 (jp-person-name and jp-address
+    added).  The detection mechanism is the existing one (a name match or
+    one shape-matching cell — the same any-1-cell signal every other suggest
+    rule uses); the pack bytes and the default-on template get their own
+    sha256 pins."""
 
     def test_birth_date_candidate_on_people(self):
         rc, out, _ = call("inspect", os.path.join(REPO, "examples", "people.csv"))
@@ -1005,7 +1006,7 @@ class T26JpBirthdate(unittest.TestCase):
             call("inspect", src, "--findings-json", fj)
             with open(fj) as fh:
                 f = json.load(fh)
-            self.assertEqual(f["pack_info"][0]["version"], "1.2.0")
+            self.assertEqual(f["pack_info"][0]["version"], "1.3.0")
             self.assertEqual(f["pack_info"][0]["sha256"], BUILTIN_PACK_SHA)
 
 

@@ -4,9 +4,10 @@ The golden outputs, the frozen cores and the import block are unchanged by the
 fold work: ``run`` must never import hintpack/derived/audit/chartable/
 hidden_chars, ``plan`` must never import audit, ``inspect`` must never import
 audit or hidden_chars, and ``audit`` must never import hintpack/derived/
-chartable/hidden_chars.  The builtin pack bytes are re-pinned to jp-basic 1.2.0
-(the jp-name-kana addition changes them on purpose).  The shared chartable
-file is re-pinned here as well (T40 owns the full content contract).
+chartable/hidden_chars.  The builtin pack bytes are re-pinned to jp-basic 1.3.0
+(the jp-person-name and jp-address additions change them on purpose).  The
+shared chartable file is re-pinned here as well (T40 owns the full content
+contract).
 """
 import contextlib
 import hashlib
@@ -21,12 +22,13 @@ from sieve_crowd.cli import main
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Golden SHAs, re-pinned for v0.7.1 (unchanged values).
+# Golden SHAs, re-pinned for v0.7.2 (RUN_TABLE_SHA and TEMPLATE_SHA unchanged).
 RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae040061500e"
 TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159"
-TEMPLATE_SHA2 = "4d8db025feae99273c9d4d22bea4af6b937d010d238eb7ad164eecaf6de47ae6"
-# jp-basic 1.2.0: the pack bytes change on purpose (jp-name-kana added).
-BUILTIN_PACK_SHA = "e863edfcb7597882098b300d7bd7a7a98c185af57bd8a21296bdc7a0f0cab291"
+TEMPLATE_SHA2 = "664a19bb8c3a0279eba10e1923ba737817110d88def32c97e966d4c1744ed94b"
+# jp-basic 1.3.0: the pack bytes change on purpose (jp-person-name and
+# jp-address added).
+BUILTIN_PACK_SHA = "c62948240bc31e35a5ffbd35ccfe943899e0b82e0ab4dbf857ad76c3135eb02c"
 CHARTABLE_SHA = "c5ae4757bc9d07a2dcd1507d662460c3412c932d73318e54912569608242e605"
 # The frozen cores: byte-for-byte, nothing in v0.7.1 may edit them.
 CONFIG_PY_SHA = "3fc0b1f9e95b7f05c88b4bf00f37faa6f529fd9e1c3fa000c54c137bd16d3a3d"
@@ -68,7 +70,7 @@ class T46Pins(unittest.TestCase):
             with open(tpl2, "rb") as fh:
                 self.assertEqual(hashlib.sha256(fh.read()).hexdigest(), TEMPLATE_SHA2)
 
-    def test_builtin_pack_bytes_are_pinned_to_1_2_0(self):
+    def test_builtin_pack_bytes_are_pinned_to_1_3_0(self):
         from sieve_crowd.hintpack_builtin import BUILTIN_PACK_BYTES
         self.assertEqual(hashlib.sha256(BUILTIN_PACK_BYTES).hexdigest(),
                          BUILTIN_PACK_SHA)

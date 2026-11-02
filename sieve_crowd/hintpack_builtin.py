@@ -37,13 +37,15 @@ assert len(_PREF_TO_REGION) == 47
 _PACK = {
     "schema": 1,
     "id": "jp-basic",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "_comment": (
         "Built-in hints for common Japanese columns. Region classification "
         "follows the 総務省/e-Stat eight-block 地方ブロック grouping: 三重=近畿, "
         "新潟=中部, 長野/岐阜=中部. 1.1.0 adds jp-birthdate (ISO YYYY-MM-DD). "
         "1.2.0 adds jp-name-kana (kana name columns suggest id). "
-        "Hints never affect the run output; edit this pack to change a standard."
+        "1.3.0 adds jp-person-name and jp-address (name-only column rules; "
+        "both suggest id). Hints never affect the run output; edit this pack "
+        "to change a standard."
     ),
     "rules": [
         {
@@ -82,6 +84,21 @@ _PACK = {
                                       "first_name_kana", "フリガナ", "ふりがな", "カナ",
                                       "氏名カナ", "氏名フリガナ", "姓カナ", "名カナ",
                                       "姓フリガナ", "名フリガナ"]},
+            "suggest": {"role": "id"},
+        },
+        {
+            "id": "jp-person-name",
+            "when": {"column_names": ["name", "full_name", "fullname", "first_name",
+                                      "last_name", "family_name", "given_name",
+                                      "customer_name", "氏名", "名前", "お名前",
+                                      "姓名", "姓", "名", "苗字", "顧客名"]},
+            "suggest": {"role": "id"},
+        },
+        {
+            "id": "jp-address",
+            "when": {"column_names": ["address", "addr", "address1", "address2",
+                                      "street", "street_address", "住所", "住所1",
+                                      "住所2", "現住所", "所在地", "番地"]},
             "suggest": {"role": "id"},
         },
         {
