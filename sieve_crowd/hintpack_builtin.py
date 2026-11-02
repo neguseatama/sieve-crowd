@@ -37,7 +37,7 @@ assert len(_PREF_TO_REGION) == 47
 _PACK = {
     "schema": 1,
     "id": "jp-basic",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "_comment": (
         "Built-in hints for common Japanese columns. Region classification "
         "follows the 総務省/e-Stat eight-block 地方ブロック grouping: 三重=近畿, "
@@ -54,19 +54,29 @@ _PACK = {
         "credit_card, カード番号, クレジットカード), and jp-zip-hyphen "
         "(#{3}-#{4}; its suggestion is the same prefix 4 as jp-zip, so the "
         "four partial levels keep the same remaining digits 6/5/4/3 and the "
-        "dash is never masked). Hints never affect the run output; edit this "
+        "dash is never masked). "
+        "1.5.0 adds jp-phone-hyphen (#{2,4}-#{2,4}-#{3,4}) and jp-card-hyphen "
+        "(#{4}-#{4}-#{4}-#{4}) - the same column names, leaks and suggestions "
+        "as jp-phone/jp-card, for hyphen-formatted values - and widens the "
+        "jp-zip / jp-zip-hyphen column names (郵便番号, 〒番号, 郵便番号1, "
+        "郵便番号2, zip_code, postal_code, post_code). "
+        "Hints never affect the run output; edit this "
         "pack to change a standard."
     ),
     "rules": [
         {
             "id": "jp-zip",
-            "when": {"column_names": ["zip", "zipcode", "postal", "postcode", "郵便", "〒"],
+            "when": {"column_names": ["zip", "zipcode", "postal", "postcode", "郵便", "〒",
+                                      "郵便番号", "〒番号", "郵便番号1", "郵便番号2",
+                                      "zip_code", "postal_code", "post_code"],
                      "value_shape": "#{7}"},
             "suggest": {"role": "qi", "type": "prefix", "length": 4},
         },
         {
             "id": "jp-zip-hyphen",
-            "when": {"column_names": ["zip", "zipcode", "postal", "postcode", "郵便", "〒"],
+            "when": {"column_names": ["zip", "zipcode", "postal", "postcode", "郵便", "〒",
+                                      "郵便番号", "〒番号", "郵便番号1", "郵便番号2",
+                                      "zip_code", "postal_code", "post_code"],
                      "value_shape": "#{3}-#{4}"},
             "suggest": {"role": "qi", "type": "prefix", "length": 4},
         },
@@ -75,6 +85,14 @@ _PACK = {
             "when": {"column_names": ["phone", "tel", "telephone", "mobile", "電話", "携帯",
                                       "電話番号", "携帯電話"],
                      "value_shape": "#{10,11}"},
+            "suggest": {"role": "id"},
+            "leak": True,
+        },
+        {
+            "id": "jp-phone-hyphen",
+            "when": {"column_names": ["phone", "tel", "telephone", "mobile", "電話", "携帯",
+                                      "電話番号", "携帯電話"],
+                     "value_shape": "#{2,4}-#{2,4}-#{3,4}"},
             "suggest": {"role": "id"},
             "leak": True,
         },
@@ -91,6 +109,15 @@ _PACK = {
             "when": {"column_names": ["card", "card_number", "credit_card",
                                       "カード番号", "クレジットカード"],
                      "value_shape": "#{13,19}"},
+            "check": {"kind": "luhn"},
+            "suggest": {"role": "id"},
+            "leak": True,
+        },
+        {
+            "id": "jp-card-hyphen",
+            "when": {"column_names": ["card", "card_number", "credit_card",
+                                      "カード番号", "クレジットカード"],
+                     "value_shape": "#{4}-#{4}-#{4}-#{4}"},
             "check": {"kind": "luhn"},
             "suggest": {"role": "id"},
             "leak": True,
