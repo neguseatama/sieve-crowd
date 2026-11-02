@@ -5,9 +5,9 @@ condition): kana name columns — furigana/kana/name_kana/last_name_kana/
 first_name_kana/フリガナ/ふりがな/カナ/氏名カナ/氏名フリガナ/姓カナ/名カナ/
 姓フリガナ/名フリガナ — suggest ``role: id`` (the treatment the direct-
 identifier hint tradition uses).  The evidence is the ``name`` stage only, so
-``role_mismatch`` can never fire for it.  The pack version is 1.4.0 since
-v0.7.3 (id suggestions, the requested column names and jp-zip-hyphen added)
-and its bytes are re-pinned (BUILTIN_PACK_SHA changes on purpose).
+``role_mismatch`` can never fire for it.  The pack version is 1.5.0 since
+v0.7.4 (jp-phone-hyphen, jp-card-hyphen and the wider zip column names
+added) and its bytes are re-pinned (BUILTIN_PACK_SHA changes on purpose).
 """
 import contextlib
 import io
@@ -20,9 +20,9 @@ from sieve_crowd.cli import main
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# jp-basic 1.4.0 (id suggestions, requested column names, jp-zip-hyphen) —
+# jp-basic 1.5.0 (jp-phone-hyphen, jp-card-hyphen, wider zip column names) —
 # the pin, re-measured from the bytes.
-BUILTIN_PACK_SHA = "f164af7018e8cfa2d08ead08f79d16b125bda2128c2fc2c30b1918e0812fd235"
+BUILTIN_PACK_SHA = "77d257be494ad149de7361855e57f6f69ea72c3361baa685fd097a4e98d28b17"
 
 
 def call(*argv):
@@ -51,7 +51,7 @@ def _plan(d, csv_data, cfg_data, *extra):
 
 
 class T47JpNameKana(unittest.TestCase):
-    """T47: name-only rule, id suggestion, no role_mismatch, version 1.4.0."""
+    """T47: name-only rule, id suggestion, no role_mismatch, version 1.5.0."""
 
     def test_builtin_pack_version_and_bytes(self):
         from sieve_crowd.hintpack import load_packs
@@ -60,7 +60,7 @@ class T47JpNameKana(unittest.TestCase):
         self.assertEqual(hashlib.sha256(BUILTIN_PACK_BYTES).hexdigest(),
                          BUILTIN_PACK_SHA)
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.4.0")  # v0.7.3 re-pin
+        self.assertEqual(packs[0].version, "1.5.0")  # v0.7.4 re-pin
 
     def test_kana_name_columns_suggest_id_with_name_evidence(self):
         csv = ("フリガナ,furigana,name,age\n"

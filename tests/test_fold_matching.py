@@ -77,7 +77,7 @@ class T42FoldedMatching(unittest.TestCase):
             self.assertEqual(rc, 0, err)
             leaks = f["columns"]["memo"]["leaks"]
             self.assertEqual([(l["rule"], l["count"]) for l in leaks],
-                             [("jp-phone", 1)])
+                             [("jp-phone", 1), ("jp-phone-hyphen", 1)])
             self.assertIn("jp-basic/jp-phone", err)
 
     def test_long_vowel_phone_in_prose_is_found_by_leak(self):
@@ -88,7 +88,7 @@ class T42FoldedMatching(unittest.TestCase):
             self.assertEqual(rc, 0, err)
             leaks = f["columns"]["memo"]["leaks"]
             self.assertEqual([(l["rule"], l["count"]) for l in leaks],
-                             [("jp-phone", 1)])
+                             [("jp-phone", 1), ("jp-phone-hyphen", 1)])
             self.assertIn("jp-basic/jp-phone", err)
 
     def test_fullwidth_email_matches(self):
@@ -114,7 +114,8 @@ class T42FoldedMatching(unittest.TestCase):
             self.assertEqual(rc, 0, err)
             leaks = f["columns"]["memo"]["leaks"]
             got = sorted((l["rule"], l["count"]) for l in leaks)
-            self.assertEqual(got, [("jp-card", 1), ("jp-mynumber", 1)])
+            self.assertEqual(got, [("jp-card", 1), ("jp-card-hyphen", 1),
+                                   ("jp-mynumber", 1)])
             self.assertIn("jp-basic/jp-card", err)
             self.assertIn("jp-basic/jp-mynumber", err)
 
@@ -149,7 +150,8 @@ class T42FoldedMatching(unittest.TestCase):
             self.assertEqual(rc, 0, err)
             leaks = f["columns"]["memo"]["leaks"]
             self.assertEqual(sorted((l["rule"], l["count"]) for l in leaks),
-                             [("jp-card", 1), ("jp-phone", 1)])
+                             [("jp-card", 1), ("jp-card-hyphen", 1),
+                              ("jp-phone", 1), ("jp-phone-hyphen", 1)])
             zip_cands = {(c["rule"], c["evidence"])
                          for c in f["columns"]["zip"]["candidates"]}
             self.assertIn(("jp-zip", "name+value"), zip_cands)

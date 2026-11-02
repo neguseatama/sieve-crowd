@@ -5,10 +5,11 @@ RUN_TABLE_SHA and TEMPLATE_SHA keep their values, ``run`` still imports none
 of the hint/derived/audit machinery, and the six frozen cores stay
 byte-for-byte (config, engine, audit, derived, chartable, hidden_chars;
 chartable_v1.json is pinned as a file).  TEMPLATE_SHA2 and BUILTIN_PACK_SHA
-are re-pinned to jp-basic 1.4.0 — the id suggestions, the new column names
-and jp-zip-hyphen change the pack bytes and, through the default-on inspect
-template (the zip column of people.csv gains the jp-zip-hyphen candidate),
-the template bytes on purpose.
+are re-pinned to jp-basic 1.4.0 — in v0.7.3 the id suggestions, the new
+column names and jp-zip-hyphen changed the pack bytes and, through the
+default-on inspect template (the zip column of people.csv gains the
+jp-zip-hyphen candidate), the template bytes on purpose.  (v0.7.4 re-pins
+BUILTIN_PACK_SHA to 1.5.0 and leaves TEMPLATE_SHA2 alone.)
 """
 import contextlib
 import hashlib
@@ -26,11 +27,11 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Golden SHAs, re-pinned for v0.7.3 (RUN_TABLE_SHA and TEMPLATE_SHA unchanged).
 RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae040061500e"
 TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159"
-# jp-basic 1.4.0: both pins change on purpose (id suggestions on the four
-# rules, the requested column names, jp-zip-hyphen; the zip column of
-# people.csv gains the jp-zip-hyphen candidate).
+# jp-basic 1.5.0 (v0.7.4): the pack sha changes on purpose (jp-phone-hyphen,
+# jp-card-hyphen, the wider zip column names); TEMPLATE_SHA2 keeps its
+# v0.7.3 value this time.
 TEMPLATE_SHA2 = "870a30b80ad93021160c38e38c5c0841234d7dc0035556b9fa5f6703d177d07b"
-BUILTIN_PACK_SHA = "f164af7018e8cfa2d08ead08f79d16b125bda2128c2fc2c30b1918e0812fd235"
+BUILTIN_PACK_SHA = "77d257be494ad149de7361855e57f6f69ea72c3361baa685fd097a4e98d28b17"
 CHARTABLE_SHA = "c5ae4757bc9d07a2dcd1507d662460c3412c932d73318e54912569608242e605"
 # The frozen cores: byte-for-byte, nothing in v0.7.3 may edit them.
 CONFIG_PY_SHA = "3fc0b1f9e95b7f05c88b4bf00f37faa6f529fd9e1c3fa000c54c137bd16d3a3d"
@@ -80,7 +81,7 @@ class T56Pins(unittest.TestCase):
         self.assertEqual(hashlib.sha256(BUILTIN_PACK_BYTES).hexdigest(),
                          BUILTIN_PACK_SHA)
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.4.0")
+        self.assertEqual(packs[0].version, "1.5.0")
 
     def test_chartable_file_is_pinned(self):
         with open(os.path.join(REPO, "sieve_crowd", "chartable_v1.json"), "rb") as fh:

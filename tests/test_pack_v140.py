@@ -39,9 +39,9 @@ from sieve_crowd.cli import main
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# jp-basic 1.4.0 (id suggestions, requested column names, jp-zip-hyphen) —
-# the pin, measured from the bytes.
-BUILTIN_PACK_SHA = "f164af7018e8cfa2d08ead08f79d16b125bda2128c2fc2c30b1918e0812fd235"
+# jp-basic 1.5.0 (jp-phone-hyphen, jp-card-hyphen, wider zip column names) —
+# the pin, re-measured from the bytes.
+BUILTIN_PACK_SHA = "77d257be494ad149de7361855e57f6f69ea72c3361baa685fd097a4e98d28b17"
 
 EMAILS = ["hina@example.co.jp", "haruto@example.ne.jp", "aoi@example.com"]
 TEL_PLAIN = ["09012345678", "0312345678", "08087654321"]   # dashless 10/11 digits
@@ -107,7 +107,7 @@ class T52IdSuggestions(unittest.TestCase):
         self.assertEqual(hashlib.sha256(BUILTIN_PACK_BYTES).hexdigest(),
                          BUILTIN_PACK_SHA)
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.4.0")
+        self.assertEqual(packs[0].version, "1.5.0")
 
     def test_four_rules_suggest_id_on_name_and_value(self):
         cols = {"email": EMAILS, "tel": TEL_PLAIN,
@@ -120,10 +120,14 @@ class T52IdSuggestions(unittest.TestCase):
             for col, rule in RULE_OF.items():
                 self.assertIn((rule, "name+value", {"role": "id"}),
                               _cands(f, col), col)
-            # nothing else fires on these columns
+            # nothing else fires on these columns; the hyphen twins
+            # (jp-basic 1.5.0) also carry their name-only candidates on the
+            # dashless values — same id suggestion, weaker evidence
+            twin = {"tel": "jp-phone-hyphen", "card_number": "jp-card-hyphen"}
             for col, rule in RULE_OF.items():
                 rules = [c[0] for c in _cands(f, col)]
-                self.assertEqual(rules, [rule], col)
+                self.assertEqual(rules, [rule] + ([twin[col]] if col in twin else []),
+                                 col)
 
     def test_requested_column_names_fire_as_name_evidence(self):
         # the names the request adds: full lists for the two rules that had
