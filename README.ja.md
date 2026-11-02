@@ -1,4 +1,4 @@
-# Sieve Crowd
+# Sieve Crowd v0.6.2
 
 [English](README.md) | 日本語
 
