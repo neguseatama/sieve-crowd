@@ -324,8 +324,10 @@ class T25DerivedSentinelsAndPins(unittest.TestCase):
     def test_findings_keys_are_additive_and_summary_shape_is_fixed(self):
         with tempfile.TemporaryDirectory() as d:
             f, _, _ = self._plan(d)
+            # v0.7.1: the invisible-character scan runs by default on plan, so
+            # its summary key joins the additive set (key addition only)
             self.assertEqual(set(f), {"packs", "pack_info", "columns", "warnings",
-                                      "derived_summary"})
+                                      "derived_summary", "hidden_chars_summary"})
             self.assertEqual(f["derived_summary"],
                              {"pairs": 2, "skipped_pairs": 0, "unchecked": 0,
                               "trivial": 0, "flagged": 2, "clear": 2})
@@ -345,7 +347,9 @@ class T25DerivedSentinelsAndPins(unittest.TestCase):
     def test_no_derived_silences_everything_derived(self):
         with tempfile.TemporaryDirectory() as d:
             f, raw, err = self._plan(d, "--no-derived")
-            self.assertEqual(set(f), {"packs", "pack_info", "columns", "warnings"})
+            # v0.7.1: the hidden-character summary stays (independent of derived)
+            self.assertEqual(set(f), {"packs", "pack_info", "columns", "warnings",
+                                      "hidden_chars_summary"})
             self.assertNotIn("derived_summary", f)
             self.assertNotIn("derived", raw)
             self.assertNotIn("derived:", err)

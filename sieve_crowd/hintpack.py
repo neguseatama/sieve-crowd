@@ -391,6 +391,7 @@ class Findings:
     warnings: list[dict]
     template_extras: dict[str, dict]   # col -> {"_suggest": {...}, "_candidates": [...]}
     derived_summary: Optional[dict] = None   # v0.6.0, plan only: the derived keep-vs-qi class counts
+    hidden_chars_summary: Optional[dict] = None   # v0.7.1, plan only: the invisible-character scan
 
     def to_json(self) -> str:
         return json.dumps(self._as_obj(), ensure_ascii=False, indent=2, sort_keys=True)
@@ -414,17 +415,21 @@ class Findings:
                "columns": cols, "warnings": self.warnings}
         if self.derived_summary is not None:      # key addition only (v0.6.0)
             obj["derived_summary"] = self.derived_summary
+        if self.hidden_chars_summary is not None:  # key addition only (v0.7.1)
+            obj["hidden_chars_summary"] = self.hidden_chars_summary
         return obj
 
     def warning_lines(self, lang: str) -> list[str]:
         """stderr lines (v0.5.1 format).  Pack findings carry the heading; the
-        derived lines (v0.6.0) follow right after them without one."""
+        derived lines (v0.6.0) and the hidden-character lines (v0.7.1) follow
+        right after them without one."""
         if not self.warnings:
             return []
         ja = lang == "ja"
         head = "ヒントパックの所見:" if ja else "Hint pack findings:"
         pack_lines: list[str] = []
         derived_lines: list[str] = []
+        hidden_lines: list[str] = []
         for w in self.warnings:
             code = w["code"]
             if code == "derived":
@@ -477,6 +482,23 @@ class Findings:
                     pack_lines.append(
                         f"  - japanese_era: \"{w['column']}\" has {w['count']} value(s) in a "
                         f"Japanese-era form (prefer ISO dates)")
+            elif code == "hidden_chars":
+                kinds = ", ".join(w["kinds"])
+                if ja:
+                    tail = ("見た目が同じ値が別のグループに分かれます"
+                            if w["declared_role"] == "qi"
+                            else "出力にそのまま残ります")
+                    hidden_lines.append(
+                        f"  - hidden_chars: 「{w['column']}」（宣言 {w['declared_role']}）: "
+                        f"{w['rows']} 行に不可視文字（{kinds}）が含まれています。{tail}")
+                else:
+                    tail = ("values that look identical form separate groups"
+                            if w["declared_role"] == "qi"
+                            else "they stay in the output")
+                    hidden_lines.append(
+                        '  - hidden_chars: "' + w["column"]
+                        + f'" (declared {w["declared_role"]}): '
+                        + f"{w['rows']} row(s) contain invisible characters ({kinds}); {tail}")
             elif code == "leak":
                 if ja:
                     pack_lines.append(
@@ -489,8 +511,8 @@ class Findings:
                         f"{w['count']} of {w['checked']} non-empty cells may contain "
                         f"{w['pack']}/{w['rule']}")
         if pack_lines:
-            return [head] + pack_lines + derived_lines
-        return derived_lines
+            return [head] + pack_lines + derived_lines + hidden_lines
+        return derived_lines + hidden_lines
 
 
 _EVIDENCE_ORDER = {"name+value": 0, "value": 1, "name": 2, "stat": 3}

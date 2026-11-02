@@ -111,6 +111,8 @@ def _parser() -> argparse.ArgumentParser:
                     help="exclude the built-in jp-basic pack (load --hint-pack files only)")
     pl.add_argument("--no-derived", action="store_true",
                     help="skip the derived keep-vs-qi relation report (on by default)")
+    pl.add_argument("--no-hidden-chars", action="store_true",
+                    help="skip the invisible-character observation (on by default)")
     pl.add_argument("--findings-json", metavar="FILE",
                     help="write the hint-pack and derived findings (aggregates only, "
                          "never cell values) as JSON")
@@ -396,6 +398,16 @@ def _cmd_plan(a: argparse.Namespace) -> int:
             findings = Findings([], [], {}, [], {})
         findings.warnings.extend(derived_warnings)
         findings.derived_summary = derived_summary
+    if not a.no_hidden_chars:
+        # v0.7.1: the invisible-character observation runs on plan with or
+        # without packs (function-level import: run never pulls this module in).
+        from .hidden_chars import analyze as _hidden_analyze
+        hidden_warnings, hidden_summary = _hidden_analyze(header, rows, roles)
+        if findings is None:
+            from .hintpack import Findings
+            findings = Findings([], [], {}, [], {})
+        findings.warnings.extend(hidden_warnings)
+        findings.hidden_chars_summary = hidden_summary
     if not a.quiet:
         if findings and findings.pack_info:
             print(_packs_line(findings.pack_info, cfg.lang == "ja"), file=sys.stderr)

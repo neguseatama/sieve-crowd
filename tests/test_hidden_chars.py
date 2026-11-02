@@ -103,8 +103,8 @@ class T43HiddenScan(unittest.TestCase):
         from sieve_crowd import hidden_chars
         from sieve_crowd.csvio import read_table
         header, rows = read_table(
-            b"a,b,c,d\n"
-            "1\u200Bx,2\u202Ey,3\U000E0001z,4\uFE0Fw\n".encode())
+            ("a,b,c,d\n"
+             "1\u200Bx,2\u202Ey,3\U000E0001z,4\uFE0Fw\n").encode())
         roles = {"a": "keep", "b": "keep", "c": "keep", "d": "keep"}
         warnings, _ = hidden_chars.analyze(header, rows, roles)
         got = {w["column"]: (w["rows"], w["chars"], w["kinds"]) for w in warnings}
