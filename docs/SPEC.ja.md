@@ -1,6 +1,6 @@
 # Sieve Crowd 仕様書
 
-バージョン0.5.0。[English](SPEC.md)
+バージョン0.7.0。[English](SPEC.md)
 
 Sieve Crowdは、人に関する表（CSV・JSON・XML）を、部外者がすでに知り得る列について少なくとも *k* 件が似通った**群れ**にすべてのレコードが属する表に変え、
 **できあがった表そのものを測定**します。オフライン、実行時の依存ゼロ、決定論的です。
@@ -106,6 +106,7 @@ Sieve Crowdは、人に関する表（CSV・JSON・XML）を、部外者がす�
 | `keygen -o F` | ランダムな鍵を書く（ファイルモード600）。`--force` なしに既存のファイルを置き換えない |
 | `run FILE -c CONFIG (-o OUT \| --dry-run)` | 匿名化。オプション：`--key-file --k --l --max-suppression --missing-value-policy --keep-order --shuffle-seed --lang --delimiter --in-format --out-format --max-rows --max-evals --report-json --quiet --force` |
 | `plan FILE -c CONFIG` | 実行前の事前プロファイル。探索の前に：オプション `--k --l --max-suppression --missing-value-policy --max-rows --max-evals --key-file --lang --delimiter --in-format --report-json --quiet --hint-pack --no-builtin-hints --no-derived --findings-json` |
+| `audit FILE -c CONFIG` | 表をいまのまま観測 — 一般化も判定も書き込みもしない（§13）：オプション `--subject --lang --delimiter --in-format --max-rows --max-evals --findings-json --quiet` |
 
 plan はそれ自身がレシートです（`status = "plan"`）。報告するのは**正確な値だけ**です。格子の大きさと最大の高さは設定だけから決まり
 （各QIは `levels + 1` 個の節を生む）、除外の上限は `min(n − 1, ⌊max_suppression × n⌋)`、列ごとの観察と段階0の群れの統計
@@ -173,6 +174,8 @@ JSON／XML に対して指定すると拒否されます。
 | — | プランの格子の大きさ・段数・予算は、探索自身の数値と一致する（推定ではなく正確な値） |
 | — | 値のNFCとNFDの表記が1つの群れになる |
 | — | 同じ論理表なら、運んだ形式に関わらず同じ出力になる。JSONとXMLは往復する |
+| — | `audit` は整数だけを報告する。行/列の入れ替えと反復実行でバイト同一であり、同値類の数は `plan` の段階 0 の `before` と一致する（同じ名前なら同じ数） |
+| — | audit の findings はセルの値を含まない（subject の値も含む）。`run`/`plan`/`inspect` は audit モジュールを import しない。`config.py` / `engine.py` はバイト同一（sha256 pin） |
 
 ## 11. 実装上の注意
 
@@ -184,6 +187,8 @@ JSON／XML に対して指定すると拒否されます。
 * `numeric` のカスタム `bins` は、設定された境界の値をそのままラベルに使います。列の整数／小数モード（`widths` と同様にデータから決める）は、
   `0-19` 形と `[0,20)` 形のどちらを選ぶかだけに関わります。
 * plan モードは run と設定の検証を共有し、表を1回読みます。格子探索は決して実行しません。
+* audit モードは run と設定の検証を共有し、エンジンの `_norm` を使います。CLI では関数レベルで import するため、
+  `run`/`plan`/`inspect` はこのモジュールを読み込みません（§13）。
 * CSV・JSON・XML（UTF-8、ヘッダ行、1つの表）。引用符付きのフィールドや区切り文字の変更は、Pythonの `csv` で対応します。
   JSONとXMLのアダプタは同じ文字列の表に正規化するので、エンジンは形式を知りません。
 * 速度の目安：10万行×QI4列で、一般的なノートPCで約6秒。
@@ -206,6 +211,26 @@ JSON／XML に対して指定すると拒否されます。
 所見は集計値と列名のみで、**セルの値は一切出ません**。`findings.packs` は従来どおりパック id の配列（読み手は不変）。トップレベルの `pack_info` が読み込み順に `{id, version, source, sha256}` を並べます（`sha256` は読み込んだバイト列そのもの・組み込みは文字列定数の UTF-8 バイト列のハッシュ・`version` がないパックは `null`）。`inspect` と `plan` は先頭に読み込んだパックを示す 1 行を出します（plan の `--quiet` では出ず、パックなしでは出ません）。走査時の警告は 4 つです: `role_mismatch`（`qi` を提案された列が name+value/value 証拠で `keep`/`sensitive` 宣言されている）、`mixed_form`（全角・半角の混在・NFC は折りたたまないため別の群れになる）、`japanese_era`（和暦形式の値）、そして plan のみ `leak`（上記）。組み込み `jp-basic` パック（version 1.1.0）は郵便番号（`prefix` length 4）、生年月日（`#{4}-#{2}-#{2}` → `qi` と `type: date` を提案・v0.6.0）、電話/マイナンバー/メール/カードの漏洩検査、47 都道府県の `category` 階層（パック内に地方区分の基準を 1 つ固定: 三重 = 近畿・新潟 = 中部）、年齢をカバーします。
 
 **`packs/` ディレクトリ（v0.6.0、v0.6.2 から市区町村版を配布）。** wheel とは別に配布するパックは `packs/` に置きます。`packs/` も `tools/` もパッケージには含まれません（wheel は `sieve_crowd` パッケージのみ）。`jp-municipality-2026` パックは `tools/make_municipality_pack.py` で生成し、ツールはヘッダで入力契約を自動判別します: デジタル庁「アドレス・ベース・レジストリ」の都道府県マスター（`lg_code` / `pref`・それ以外の列は無視・コードは先頭 5 桁が `000` で終わる都道府県レベルのもののみ、違反は終了コード 2）か、総務省の全国地方公共団体コード（`団体コード` / `都道府県名` / `市区町村名`）。両方のコード列があれば曖昧として拒否します。入力 1 個で 3 ルール、入力 2 個 — 都道府県ソースと市区町村ソースを各 1 つずつ・順序不問 — は 4 ルールへマージされ（2 つのコード ルールは両ソースの和集合・名前ルールはソースごと）、マージ出力は入力順に依存しません。同じ契約の 2 個や 3 個以上の入力は終了コード 2。`--pack-version` でパックに書き込む版を指定します（既定 1.0.0）。標準ライブラリのみ・同じ入力ならバイト同一の決定論的な出力（値リストは昇順・キー順固定・2 スペース）、全く同じ行の重複は統合し（ソースをまたぐ場合も・内容が異なる重複は終了コード 2）、契約違反（列名の不一致・6 桁でないコード・都道府県モードで都道府県レベルでないコード・内容の異なる重複・空の名称）は列名と行番号だけ示して終了コード 2（セルの値は出ません）。ルール（`jp-municipality-code` 6 桁 → prefix 5 を提案・`jp-municipality-code5` 5 桁 → prefix 2 を提案・`jp-prefecture-name` と `jp-municipality-name` → category を提案）は組み込みと共存でき（id の衝突なし）`parse_config` を通ります。市区町村版はリポジトリに同梱（パック 1.1.0）: `packs/mt_pref_all.csv`（ABR 47 行の抽出・コミット時に改行を CRLF → LF へ正規化）、`packs/soumu_city_r611.csv`（総務省 1,747 行の抽出・基準日 R6.1.1 = 2024-01-01・受領 xlsx からシートの 47 都道府県行を除いて変換）と生成済み `packs/jp-municipality-2026.json`。同梱 2 抽出からの `--pack-version 1.1.0` 再生成は同梱パックとバイト一致します（T29）。両出典とも PDL 1.0（総務省はサイト表示に公共データ利用規約第1.0版を適用と明記）で、必要な出典表記（出典明記＋加工の明示、ロゴ不使用）は packs/README.md に記録。町字レベルのマスター（156 MB）と総務省の政令指定都市シートは同梱しません。
+
+## 13. audit（v0.7.0、観測のみ）
+
+`audit FILE -c CONFIG [--subject COLUMN] [--findings-json FILE] [--lang]` は、表を **いまのまま** 観測します。一般化もせず、除外もせず、拒否もせず、判定もしません。`plan` が実行の見積り、`run` が表の変換だとすれば、`audit` は数えるだけです。報告はすべて整数で、割合は千分率の切り捨て（`1000 * count // n`、`n = 0` は 0）。浮動小数点は一切計算しないため、同じ表はどの環境でもバイト同一の出力になります。設定から使うのは `qi` 列・`k`・`l` と各列の役割（subject の検証用）だけで、**一般化は適用しません**。表の値をそのまま観測します。オプション `--delimiter --in-format --max-rows --max-evals --findings-json --quiet --lang` は `plan` と同じ挙動で、人間向けの報告は stderr に、stdout は空のまま、書き込むファイルは任意の `--findings-json` だけです。終了コード： 0（観測の完了。警告があっても 0）· 1（I/O）· 2（設定/使い方/入力）。拒否の状態はありません。
+
+**既存方針との一致。** 値はエンジンの `_norm`（NFC＋前後空白除去）で比較し、同値類は `measure`/`diagnose` の段階 0 と同じ作り方です。すべての行が参加し、空の QI 値は空文字列という値として振る舞い、`missing_value_policy` は**適用しません**（行を除外するのは変換であって観測ではないため）。したがってこれらは `plan` が段階 0 の `before` として報告するのと同じ数 — `count` = `crowds`、`min_size` = `smallest_crowd`、`unique_rows` = `records_alone`、`rows_below_k` = `records_below_k` — で、同じ名前なら同じ数です（T31 が固定）。
+
+**A — 同値類**（`classes`）: `count`、`min_size`、`unique_rows`（サイズ 1 の同値類に属する行）、`rows_below_k`（サイズが k より小さい同値類に属する行）、`unique_permille` / `below_k_permille`（n に対する千分率・切り捨て）、`size_buckets`（固定バケット `"1" "2" "3" "4" "5-9" "10-49" "50+"` ごとの**行数**。キーは常にすべて存在し、空なら 0。数えるのはクラス数ではなく行数）。
+
+**B — QI 列ごと**（`qi_columns`、正規順序: 列名のソート順）: `distinct`（異なり値数。空セルを除く — inspect の `distinct` は空値も数えますが、audit は数えません。空のセルは値を持たないため）、`unique_rows`（正規化した値が空でなく、その列内で 1 回しか現れない行の数）、`rows_below_k_without`（その列を外した組で同値類を作り直したときの `rows_below_k`。1 列につき O(n)）。QI が 1 列のときは外すと全行で 1 つの同値類になるため、`n < k` なら `n`、それ以外は 0。
+
+**C — 同一対象の繰り返し**（`subject`、`--subject COLUMN` 指定時のみ）: k-匿名性は行について語りますが、人は複数の行にまたがれます。subject 列は、設定にあり役割が `qi`/`sensitive` 以外の列（`id`・`keep`・`drop` は可。典型は id 列）である必要があり、違反は列名だけを述べるメッセージで終了コード 2。観測は `rows_with_subject` / `rows_missing_subject`、`subjects`、`repeated_subjects`（2 行以上に現れる対象）、`rows_in_repeated_subjects`、`max_rows_per_subject`、`rows_per_subject_buckets`（固定バケット `"1" "2" "3-4" "5-9" "10+"` ごとの対象数）、`class_subjects`: 同値類ごとの**異なる対象数** — `min_distinct`、`rows_below_k`（異なる対象数が k 未満の同値類に属する行 = 人の上の k 未満）、`rows_overstated`（サイズは k 以上だが異なる対象数が k 未満の同値類に属する行 = 行の上では安全に見え、人の上では届かない行）。**空の subject 値は 1 行で 1 人の対象**: 空のセル同士は同一人物かどうか判別できないため、空の行はすべて別々の対象（1 行 = 1 人）として、subject 項目のすべてで一貫して扱います（したがって繰り返しにはなりません）。`--subject` がなければ C の項目は現れず、`subject` は `null` です。
+
+**決定性。** 行の並べ替えも列の並べ替えも何も変えません。QI 列はソート順で報告し、集計はすべて順序に依存せず、同じ入力への反復実行はバイト同一です（T36）。
+
+**警告。** 件数として述べる観測の言い換えであって、判定語は使いません。従来の `  - code: …` 書式（英日の 2 通り）で stderr に、findings では `warnings` 要素 `{code, rows}` として現れます: `small_classes`（`rows_below_k > 0`）と `subject_overstated`（`rows_overstated > 0`）。警告は終了コードを変えません（0）。`n` が `--max-rows` を超えるときは、plan と同じく stderr に `rows_over_limit` の注意行を出します（audit は探索しないので、観測は単にすべての行を読みます）。これは audit の警告ではなく findings には入りません。
+
+**findings**（`--findings-json`）: 既存の findings とは別のファイルで、`{"audit": {...}}` の形。`schema: 1` と固定のキー集合 — トップレベルは `schema, rows, k, qi, classes, qi_columns, subject, warnings`。集計と列名のみを運び、**セルの値は一切含みません（subject の値も含む）**（T37）。plan の findings と同じく、原子的かつ無条件に書き換えます。
+
+**範囲の注記。** エントロピーはありません: 対数は出力に浮動小数点を持ち込み、浮動小数点は環境によって末尾の桁が変わることがあります。整数は変わりません。再現性を実測してから、別の版で判断します。`l` は構文解析されますが、audit の項目では使いません（l/t の観測は範囲外）。audit モジュールは audit ハンドラだけが import し、`run`・`plan`・`inspect` は決して import しません（T38 が subprocess の検査を拡張。凍結された `config.py` / `engine.py` は無変更で、その sha256 を T38 が固定します）。実測（依頼書 4.6 節）: 10 万行 × QI 4 列で、subject なしで約 0.4 秒、ありで約 0.6 秒（ラップトップ級 CPU。列を外す B の反復はおよそ O(#QI × n) を追加）。
 
 ## 付録　独自に決めたこと
 

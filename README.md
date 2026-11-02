@@ -1,4 +1,4 @@
-# Sieve Crowd v0.6.2
+# Sieve Crowd v0.7.0
 
 English | [日本語](README.ja.md)
 
@@ -59,6 +59,8 @@ Sieve is a family of engines that share three design principles — deterministi
   Data is not rounded more than necessary; resolution is preserved as much as possible while grouping. Records that still cannot form a group are safely removed (suppressed) rather than distorted.
 - **Pre-flight plan**
   `sieve-crowd plan` reports, before any search, the exact search-space size (lattice nodes), the suppression budget, the level-0 risk profile and warnings (unreachable k/l, tight limits, many isolated records) — plus, since v0.6.0, the derived keep-vs-qi relations (does a kept column nearly determine a quasi-identifier, in either direction) — so tuning happens before the run, not after.
+- **Audit the table as it is**
+  `sieve-crowd audit` observes the current table in integers only — equivalence classes and size buckets, which QI column carries the grouping, and, with `--subject`, the people behind the rows: a class can reach k on rows and still hold fewer than k distinct people, and audit counts those rows instead of judging them.
 - **Diagnostics in the receipt**
   When records are suppressed, the receipt explains why — crowd sizes, "smaller than k" vs "short of diversity", and a per-column hint of which quasi-identifier one more generalization step would rescue. In aggregates only; never a cell value.
 - **Custom bins for numeric columns**
@@ -138,6 +140,24 @@ Yamamoto Aoi,1971-10-04,55,1510061,M,flu        55-59,15100**,M,asthma
 
 ---
 
+## 🔍 Audit the table as it is (v0.7.0)
+
+`sieve-crowd audit` observes what the table looks like **right now**. It generalizes nothing, suppresses nothing, refuses nothing — and judges nothing. Where `plan` estimates a run and `run` transforms the table, `audit` only counts, and every number it reports is an integer: ratios are floored per-mille values (integer division, no floats), so the same table yields byte-identical output everywhere.
+
+```bash
+sieve-crowd audit people.csv -c config.json                       # the rows
+sieve-crowd audit people.csv -c config.json --subject id          # the people behind the rows
+sieve-crowd audit people.csv -c config.json --findings-json a.json
+```
+
+- **Equivalence classes** — how many groups the QI tuple forms, the smallest one, the rows that are alone, the rows below `k`, the floored per-mille of both, and the rows per fixed size bucket (`1`, `2`, `3`, `4`, `5-9`, `10-49`, `50+`). These are the same numbers `plan` reports as its level-0 `before` block — same names, same numbers.
+- **Per QI column** — distinct values (empty cells excluded), rows whose value is unique in that column, and how many rows would still sit below `k` with that column dropped from the tuple: which column carries the grouping, in integers.
+- **Repeated subjects** (with `--subject COLUMN`) — k-anonymity speaks about rows, but a person can sit in several of them. `audit` counts the people: rows per subject and their buckets, and, per class, the number of **distinct subjects** — including `rows_overstated`, the rows in classes that look safe on rows (size ≥ k) but hold fewer than k distinct people.
+
+The subject column must be a configured column whose role is not `qi`/`sensitive` (an `id` column is typical); anything else exits with code 2, naming the column. **An empty subject value is treated as a person of its own** — two empty cells cannot be told apart, so every empty-subject row is one person with one row, in every subject observation alike. Without `--subject` the people counts are skipped (`subject: null`). Warnings restate observations without judging — `small_classes` (rows below k) and `subject_overstated` (the overstated rows), in the usual `  - code: …` form, exit code 0. The table is only read; nothing is written except the optional `--findings-json` (schema 1, aggregates and column names only, **never a cell value** — subject values included). `audit` deliberately has no entropy metric: a logarithm would put a float into the output, and floats can differ in their last digits across environments — integers cannot.
+
+---
+
 ## 🧪 Hint packs (built-in on by default)
 
 `inspect` and `plan` load **hint packs** — JSON files that suggest a role and a generalizer for a column and check value shapes, without ever touching the anonymization. Since v0.5.1 the built-in `jp-basic` pack is loaded **by default**; `--no-builtin-hints` turns it off. `run` never reads a pack: the run path stays byte-for-byte unchanged from v0.4.0 (pass `--no-builtin-hints` and give no pack, and even the inspect template is the exact v0.4.0 bytes).
@@ -182,6 +202,7 @@ Main command-line options:
 
 - `--dry-run`: do not write data; only measure anonymization and assess risk
 - `sieve-crowd plan people.csv -c config.json`: pre-flight estimate of the search space, budget and warnings, including the derived keep-vs-qi relations (`--no-derived` skips them; no search, no output)
+- `sieve-crowd audit people.csv -c config.json [--subject COLUMN]`: observe the current table — classes, per-QI columns, repeated subjects (integers only; no search, no output)
 - `--lang ja`: issue a Japanese receipt (default is English; JSON output is also available)
 - `--in-format` / `--out-format`: explicitly set the input/output format (csv, json, xml)
 - `sieve-crowd keygen -o key.txt`: generate a cryptographic key for pseudonymization
@@ -231,6 +252,7 @@ One line per release. The feature sections above always describe the current ver
 
 | Version | Highlights |
 | :--- | :--- |
+| 0.7.0 | The `audit` subcommand: an integer-only observation of the table as it is — equivalence classes and size buckets, per-QI-column leverage (distinct, column-unique rows, rows below k without the column), and, with `--subject`, the people behind the rows (repeats, subjects per class, and `rows_overstated`: classes that look safe on rows but hold fewer than k distinct people). Nothing is generalized, judged or written; `run`/`plan`/`inspect` are byte-identical to 0.6.2. |
 | 0.6.2 | Municipality edition of the `jp-municipality-2026` pack (pack 1.1.0): the 総務省 "地方公共団体コード一覧" extract (basis date R6.1.1 = 2024-01-01, 1,747 municipalities) committed alongside the ABR prefecture extract, and the generator merges one prefecture + one municipality source (either order, `--pack-version`) into a single four-rule pack — 1,794 codes, 1,794 five-digit prefixes, 47 prefecture names, 1,714 distinct municipality names. Both sources are PDL 1.0. |
 | 0.6.1 | Prefecture edition committed in `packs/`: the ABR prefecture master extract (47 prefectures, PDL 1.0), the generated pack, a prefecture mode for the generator with a fail-closed prefecture-level guard, and the attribution and compliance notes in `packs/README.md`. |
 | 0.6.0 | Derived keep-vs-qi relations on `plan` (both directions, four classes, `derived_summary`, `--no-derived`); the `jp-birthdate` rule (jp-basic 1.1.0); the pack generator `tools/make_municipality_pack.py` and the `packs/` directory (generator only — the data arrived with 0.6.1). |
