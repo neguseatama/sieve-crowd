@@ -34,3 +34,6 @@ sieve-crowd = "sieve_crowd.cli:main"
 
 [tool.setuptools]
 packages = ["sieve_crowd"]
+
+[tool.setuptools.package-data]
+sieve_crowd = ["chartable_v1.json"]
