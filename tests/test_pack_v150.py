@@ -262,8 +262,14 @@ class T58CardHyphen(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             rc, out, err, f = _plan(d, _csv(cols), _config(roles))
             self.assertEqual(rc, 0, err)
-            self.assertEqual(_cands(f, "クレジットカード")[0],
-                             ("jp-card-hyphen", "name+value", ID))
+            # v0.7.5: the luhn evaluation strips the dashes, so jp-card's
+            # check now matches these dashed (luhn-valid) values too — its
+            # evidence upgrades from name to name+value and the candidate
+            # order follows (rule-id order at equal evidence; both rules
+            # still suggest id, so _suggest is unchanged)
+            self.assertEqual(_cands(f, "クレジットカード"),
+                             [("jp-card", "name+value", ID),
+                              ("jp-card-hyphen", "name+value", ID)])
             self.assertFalse([w for w in f["warnings"]
                               if w["code"] == "mixed_form"])
 

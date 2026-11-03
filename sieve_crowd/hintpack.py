@@ -23,7 +23,9 @@ The matching vocabulary is a closed set:
 Since v0.7.1 the value inputs are folded through the shared chartable
 (``chartable.fold``) before matching: ``value_shape`` and the leak scan fold
 with ``dashes=True`` (shape matching — the long-vowel mark and the other
-folding dashes become ``-``), the value checks fold with ``dashes=False``.
+folding dashes become ``-``), the value checks fold with ``dashes=False``
+(v0.7.5: the luhn evaluation alone re-folds with ``dashes=True`` and strips
+the dashes first, so hyphenated card numbers reach luhn — ``_luhn_digits``).
 The fold is a fixed mapping, so pure-ASCII input is unchanged and the match
 results stay byte-identical there; full-width digits, full-width symbols,
 long-vowel dashes and invisible characters now reach the matchers (the v0.5.2
@@ -127,6 +129,23 @@ def _luhn(digits: str) -> bool:
     return s % 10 == 0
 
 
+def _luhn_digits(value: str) -> str:
+    """v0.7.5 (README known-limitation 6 resolved): the value checks fold with
+    ``dashes=False``, so a hyphenated card number never reached luhn — it
+    counted as ``cannot_check``.  The luhn evaluation alone re-folds its input
+    with ``dashes=True`` and accepts it only when the result is a run of ASCII
+    digits and dashes: the dash-stripped digits go to luhn.  Anything else —
+    letters, spaces, no digits, non-ASCII digits — stays ``cannot_check``.
+    Dashless values take the same path (the fold is idempotent and every
+    printable ASCII character is invariant), so their results are unchanged."""
+    from .chartable import fold   # function-level, as in scan(): run never gets here
+    fv = fold(value, dashes=True)
+    core = fv.replace("-", "")
+    if core and core.isascii() and core.isdigit():
+        return core
+    return ""
+
+
 def _my_number_ok(digits: str) -> bool:
     """12-digit Japanese My Number: 11 body digits + 1 check digit (residue 11)."""
     if len(digits) != 12 or not digits.isdigit():
@@ -157,8 +176,10 @@ def _eval_check(check: "Check", value: str) -> str:
             return "cannot_check"
         return "match" if check.min <= x <= check.max else "mismatch"
     if kind == "luhn":
-        return "match" if value.isdigit() and _luhn(value) else (
-            "mismatch" if value.isdigit() else "cannot_check")
+        digits = _luhn_digits(value)   # v0.7.5: dash-folded, digits and dashes only
+        if digits:
+            return "match" if _luhn(digits) else "mismatch"
+        return "cannot_check"
     if kind == "my_number":
         return "match" if _my_number_ok(value) else (
             "mismatch" if value.isdigit() and len(value) == 12 else "cannot_check")
