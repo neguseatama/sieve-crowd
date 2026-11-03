@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
@@ -134,6 +135,34 @@ def _parser() -> argparse.ArgumentParser:
     au.add_argument("--findings-json", metavar="FILE",
                     help="write the audit observation (aggregates only, never cell values) as JSON")
     au.add_argument("--quiet", action="store_true")
+
+    sc = sub.add_parser("scan", help="write one static HTML page that shows how the table "
+                                     "looks right now (roles, groups, observations; nothing "
+                                     "searched, no cell values)")
+    sc.add_argument("input")
+    sc.add_argument("-c", "--config",
+                    help="use the declared roles as they are (scan = plan + audit); "
+                         "without it the roles are provisional, from the hint packs")
+    sc.add_argument("--hint-pack", metavar="FILE", action="append",
+                    help="load a hint pack (may be given more than once)")
+    sc.add_argument("--no-builtin-hints", action="store_true",
+                    help="exclude the built-in jp-basic pack (load --hint-pack files only)")
+    sc.add_argument("--no-hidden-chars", action="store_true",
+                    help="skip the invisible-character observation (on by default)")
+    sc.add_argument("--subject", metavar="COLUMN",
+                    help="the column that says who is who (name, customer id, ...); "
+                         "repeats are observed on it")
+    sc.add_argument("--k", type=int,
+                    help="k for the provisional roles (without -c; default 5); with -c "
+                         "it overrides the configured k like on plan")
+    sc.add_argument("--max-rows", type=int, default=200_000,
+                    help="read every row; the report notes when the table is larger "
+                         "(default: %(default)s)")
+    sc.add_argument("--no-derived", action="store_true",
+                    help="skip the derived keep-vs-qi relation report (on by default)")
+    sc.add_argument("--lang", choices=["en", "ja"], default="en")
+    sc.add_argument("-o", "--output", help="the HTML file (default: INPUT with the last "
+                                           "extension replaced by .scan.html; '-' is stdout)")
     return p
 
 
@@ -467,7 +496,147 @@ def _cmd_audit(a: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_scan(a: argparse.Namespace) -> int:
+    """One static HTML page: how the table looks right now (v0.8.0).
+
+    The imports live here, function level, like every other optional module:
+    run/plan/inspect/audit never pull :mod:`sieve_crowd.scan` in.  Exit codes:
+    0 ok (also when no quasi-identifier candidate was found) - 1 I/O -
+    2 usage (stdin without -o), same-path refusal, configuration or pack
+    errors, invalid input.
+    """
+    if a.input == "-" and not a.output:
+        print("error: give -o/--output when the input is standard input",
+              file=sys.stderr)
+        return EXIT_CONFIG
+    if a.k is not None and a.k < 2:
+        print("error: k must be an integer >= 2", file=sys.stderr)
+        return EXIT_CONFIG
+    if a.output and a.output != "-":
+        real_out = os.path.realpath(a.output)
+        clash = ((a.input != "-" and real_out == os.path.realpath(a.input))
+                 or (a.config and real_out == os.path.realpath(a.config)))
+        if clash:
+            print("error: the output must not be the input file or the configuration file",
+                  file=sys.stderr)
+            return EXIT_CONFIG                    # nothing is written
+    try:
+        in_fmt = _resolve_format(a.input, None, dash_default="csv")
+    except InputError as exc:
+        print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    try:
+        data = _read(a.input)
+    except OSError as exc:
+        print(f"error: cannot read the input ({exc.strerror})", file=sys.stderr)
+        return EXIT_IO
+    try:
+        header, rows = read_any(data, in_fmt, None)
+    except InputError as exc:
+        print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    packs = _hint_packs(a)
+    if isinstance(packs, int):
+        return packs
+    try:
+        if a.config:
+            try:
+                with open(a.config, "rb") as fh:
+                    raw = json.loads(fh.read().decode("utf-8-sig"))
+            except OSError as exc:
+                print(f"error: cannot read the configuration ({exc.strerror})",
+                      file=sys.stderr)
+                return EXIT_IO
+            cfg = parse_config(raw, k=a.k, lang=a.lang, max_rows=a.max_rows)
+            obs_roles = {name: spec.role.value for name, spec in cfg.columns.items()}
+            provisional, unassigned, k = False, frozenset(), cfg.k
+        else:
+            cfg, obs_roles = None, None
+            provisional = True
+            unassigned = frozenset()
+            k = a.k if a.k is not None else 5
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        print("error: the configuration is not valid JSON", file=sys.stderr)
+        return EXIT_CONFIG
+    info = inspect_table(header, rows)
+    findings = None
+    if packs:
+        from .hintpack import scan as _hint_scan
+        findings = _hint_scan(header, rows, info, packs,
+                              cfg_roles=None if provisional else obs_roles)
+    if provisional:
+        # the provisional roles: the first candidate's suggestion (v0.5.2
+        # order), unassigned columns provisionally keep so the derived and
+        # hidden-character observations can still look at them
+        role_map: dict = {}
+        for h in header:
+            extra = findings.template_extras.get(h) if findings is not None else None
+            r = extra["_suggest"].get("role") if extra else None
+            role_map[h] = r if r in ("id", "qi", "sensitive", "keep", "drop") else None
+        unassigned = frozenset(h for h in header if role_map[h] is None)
+        obs_roles = {h: (role_map[h] or "keep") for h in header}
+        if any(role_map[h] == "qi" for h in header):
+            cols = {}
+            for h in header:
+                r = role_map[h]
+                cols[h] = ({"role": "qi", "type": "exact"} if r == "qi" else
+                           {"role": "id"} if r == "id" else
+                           {"role": "sensitive"} if r == "sensitive" else
+                           {"role": "drop"} if r == "drop" else {"role": "keep"})
+            try:
+                cfg = parse_config({"k": k, "columns": cols},
+                                   lang=a.lang, max_rows=a.max_rows)
+            except ConfigError as exc:
+                print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+        # else: no qi candidate -> cfg stays None, the audit sections stay out
+    derived_result = None
+    if cfg is not None and not a.no_derived:
+        from .derived import analyze as _derived_analyze
+        derived_result = _derived_analyze(header, rows, obs_roles)
+    hidden_result = None
+    if not a.no_hidden_chars:
+        from .hidden_chars import analyze as _hidden_analyze
+        hidden_result = _hidden_analyze(header, rows, obs_roles)
+    audit_result = None
+    if cfg is not None:
+        from .audit import audit_table, validate_subject
+        try:
+            validate_subject(cfg, a.subject)
+            audit_result = audit_table(header, rows, cfg, subject=a.subject)
+        except ConfigError as exc:
+            print(f"error: {exc}", file=sys.stderr); return EXIT_CONFIG
+    from .scan import page
+    html = page(header, rows, cfg=cfg, k=k, roles=obs_roles, provisional=provisional,
+                unassigned=unassigned, findings=findings, derived=derived_result,
+                hidden=hidden_result, audit=audit_result, subject=a.subject,
+                lang=a.lang,
+                input_name=None if a.input == "-" else os.path.basename(a.input),
+                input_sha256=hashlib.sha256(data).hexdigest(),
+                config_name=os.path.basename(a.config) if a.config else None)
+    payload = html.encode("utf-8")
+    try:
+        if a.output == "-":
+            sys.stdout.buffer.write(payload); sys.stdout.buffer.flush()
+            dest = "（標準出力）" if a.lang == "ja" else "(standard output)"
+        else:
+            dest = a.output or os.path.splitext(a.input)[0] + ".scan.html"
+            _atomic_write(dest, payload)
+    except OSError as exc:
+        print(f"error: cannot write ({exc.strerror})", file=sys.stderr)
+        return EXIT_IO
+    w = ((len(findings.warnings) if findings is not None else 0)
+         + (len(derived_result[0]) if derived_result is not None else 0)
+         + (len(hidden_result[0]) if hidden_result is not None else 0))
+    if a.lang == "ja":
+        print(f"scan: {dest} に書きました（{len(rows)} 行、{len(header)} 列、所見 {w} 件）",
+              file=sys.stderr)
+    else:
+        print(f"scan: wrote {dest} ({len(rows)} rows, {len(header)} columns, "
+              f"{w} findings)", file=sys.stderr)
+    return EXIT_OK
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     a = _parser().parse_args(argv)
     return {"inspect": _cmd_inspect, "keygen": _cmd_keygen, "run": _cmd_run,
-            "plan": _cmd_plan, "audit": _cmd_audit}[a.cmd](a)
+            "plan": _cmd_plan, "audit": _cmd_audit, "scan": _cmd_scan}[a.cmd](a)
