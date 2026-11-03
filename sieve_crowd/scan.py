@@ -135,7 +135,7 @@ _W = {
         "s2_cfg": "The configuration treats {parts} column(s).",
         "part_sep": ", ",
         "part_unit": " column(s)",
-        "role_unassigned_label": "unassigned",
+        "part_unassigned": "{label} {count}{unit}",
         "s3_groups": ("Rows sharing the same quasi-identifier values form {count} "
                       "group(s); the smallest holds {min} row(s). {pct}% of the rows "
                       "sit in groups smaller than k = {k}."),
@@ -229,6 +229,12 @@ _W = {
                        "names."),
         "next_q_note": "columns with role ? need a decided role before plan/run.",
         "about_items": [
+            "this is an observation, not a judgment of safety. The numbers are the "
+            "values of this table under the roles as they are placed now.",
+            "the table is assumed to have one row per person. If the same person "
+            "appears in more than one row, observe the repetition with --subject.",
+            "k-anonymity does not prevent matching against other information, or "
+            "guessing an attribute from the values inside a group.",
             "this report was produced by reading the table once; it changes nothing and "
             "writes only this page.",
             "no cell value appears anywhere. The page carries column names, counts, "
@@ -273,11 +279,11 @@ _W = {
         "h2_about": "この報告について",
         "howto": "この節の読み方: {text}",
         "s1_size": "この表は {rows} 行 × {cols} 列です。",
-        "s2_prov": "列の役割は仮のおき方で、{parts}です。",
+        "s2_prov": "列の役割は仮の割り当てで、{parts}です。",
         "s2_cfg": "設定では{parts}として扱います。",
         "part_sep": "・",
         "part_unit": " 列",
-        "role_unassigned_label": "未割当",
+        "part_unassigned": "{label}{count}{unit}",
         "s3_groups": ("同じ準識別子の値の組を持つ行の集まり（グループ）は {count} 個で、"
                       "最小 {min} 行です。k = {k} 未満のグループに属する行は {pct}% です。"),
         "s4_findings": "パックと観測の所見は計 {w} 件で、列の一覧に件数を記録しました。",
@@ -288,7 +294,7 @@ _W = {
                      "導出関係の各節は省きました。どの列を準識別子として扱うかを決めて設定に"
                      "書けば、plan と run が使えます。"),
         "howto_summary": "表全体のあらましを、短い文と整数だけで書いています。",
-        "howto_columns_prov": ("役割は現時点の仮のおき方です。根拠は、いちばん上の候補をパックが"
+        "howto_columns_prov": ("役割は現時点の仮の割り当てです。根拠は、いちばん上の候補をパックが"
                                "列の名前と値のどちらから判断したかを示します。所見は種類ごとの"
                                "件数で、何も書かれていない種別は 0 件です。"),
         "howto_columns_cfg": ("役割は設定で宣言されたものです。根拠と所見はパックの観察です。"
@@ -307,7 +313,8 @@ _W = {
                          "数えています。棒の長さは全体の中の割合（整数パーセント、切り捨て）の"
                          "目安で、数値が正確な値です。"),
         "intro_groups": ("グループは {count} 個で、最小のグループは {min} 行です。"
-                         "一独りの行は {up}%、k = {k} 未満のグループに属する行は {bp}% です。"),
+                         "1 行だけのグループに属する行は {up}%、"
+                         "k = {k} 未満のグループに属する行は {bp}% です。"),
         "over_limit": "行数 {rows} は上限 {max_rows} を超えています。観測はすべての行を読みました。",
         "cap_groups": "グループのサイズ別の行数",
         "th_bucket": "サイズ",
@@ -318,7 +325,7 @@ _W = {
                             "分かれ方に効いているかを数えています。"),
         "cap_percolumn": "準識別子の列ごとの観測",
         "th_distinct": "異なる値",
-        "th_unique": "一独りの行",
+        "th_unique": "1 行だけのグループに属する行",
         "th_without": "この列を外すと k 未満になる行",
         "howto_derived": ("keep（出力にそのまま残す）として扱った列と準識別子の列の組み合わせを、"
                           "両方向で調べています。支持は根拠となる行数、違反は値を言い当てられなかった"
@@ -356,6 +363,9 @@ _W = {
         "howto_next": "下書きは編集して使うためのものです。コマンド例のファイル名は読み替えてください。",
         "next_q_note": "role が ? の列は、役割を決めてから plan / run してください。",
         "about_items": [
+            "これは観測であって、安全かどうかの判定ではありません。数値は、この表の、いまの役割の置き方での値です。",
+            "1 人が 1 行の表であることを前提にしています。同じ人が複数の行にいる場合は、--subject を指定して観測してください。",
+            "k-匿名性は、別の情報との照合や、同じグループ内の値からの属性の推測を防ぐものではありません。",
             "この報告は、表を 1 回読んで作った静的なページです。表も設定も書き換えません。",
             "セルの値はどこにも載っていません。載っているのは列名・件数・割合・ルール id・"
             "ファイル名・入力の SHA-256 だけです。",
@@ -368,7 +378,7 @@ _W = {
             "色は情報を運びません（中性の色だけを使っています）。",
             f"sieve-crowd scan（Sieve Crowd {__version__}）が作成しました。",
         ],
-        "roles_note_prov": "仮の役割はヒントパックの候補から暫時に置いたもので、決定ではありません。",
+        "roles_note_prov": "仮の役割はヒントパックの候補から仮に置いたもので、決定ではありません。",
         "roles_note_cfg": "役割は設定で宣言されたものをそのまま使っています。",
     },
 }
@@ -522,12 +532,22 @@ def page(header: Sequence[str], rows: Sequence[Sequence[str]], *, cfg,
          + (len(hidden[0]) if hidden is not None else 0))
     unit_col = "" if lang == "en" else " 列"
     role_parts = []
-    for role in ("qi", "id", "sensitive", "keep", "drop"):
-        c = sum(1 for h in header if roles[h] == role)
+    if provisional:
+        # the summary counts every column once: the provisional keeps (the
+        # unassigned columns) form one bucket, never a second "keep" bucket
+        for role in ("qi", "id", "sensitive"):
+            c = sum(1 for h in header if roles[h] == role)
+            if c:
+                role_parts.append(f"{role} {c}{unit_col}")
+        c = sum(1 for h in header if roles[h] == "keep")
         if c:
-            role_parts.append(f"{role} {c}{unit_col}")
-    if unassigned:
-        role_parts.append(f"{m['role_unassigned_label']} {len(unassigned)}{unit_col}")
+            role_parts.append(m["part_unassigned"].format(
+                label=m["role_unassigned"], count=c, unit=unit_col))
+    else:
+        for role in ("qi", "id", "sensitive", "keep", "drop"):
+            c = sum(1 for h in header if roles[h] == role)
+            if c:
+                role_parts.append(f"{role} {c}{unit_col}")
     joined = m["part_sep"].join(role_parts)
     s2 = _esc_lit(m["s2_prov"] if provisional else m["s2_cfg"]).format(parts=joined)
     sentences = [_esc_lit(m["s1_size"]).format(rows=n, cols=len(header)), s2]
