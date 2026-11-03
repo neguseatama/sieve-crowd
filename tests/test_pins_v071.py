@@ -5,7 +5,7 @@ fold work: ``run`` must never import hintpack/derived/audit/chartable/
 hidden_chars, ``plan`` must never import audit, ``inspect`` must never import
 audit or hidden_chars, and ``audit`` must never import hintpack/derived/
 chartable/hidden_chars.  The builtin pack bytes are re-pinned (latest:
-jp-basic 1.5.0 — the v0.7.4 hint work changes them on purpose).  The
+jp-basic 1.6.0 — the v0.7.5 pack work changes them on purpose).  The
 shared chartable file is re-pinned here as well (T40 owns the full content
 contract).
 """
@@ -26,9 +26,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae040061500e"
 TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159"
 TEMPLATE_SHA2 = "870a30b80ad93021160c38e38c5c0841234d7dc0035556b9fa5f6703d177d07b"
-# jp-basic 1.5.0: the pack bytes change on purpose (jp-phone-hyphen,
-# jp-card-hyphen and the wider zip column names added).
-BUILTIN_PACK_SHA = "77d257be494ad149de7361855e57f6f69ea72c3361baa685fd097a4e98d28b17"
+# jp-basic 1.6.0: the pack bytes change on purpose (the wider phone/email/
+# card column names added).
+BUILTIN_PACK_SHA = "79b33a820a3d6d994ef366e1f11be53d3cbd71a4f46a3847987cff147789e34f"
 CHARTABLE_SHA = "c5ae4757bc9d07a2dcd1507d662460c3412c932d73318e54912569608242e605"
 # The frozen cores: byte-for-byte, nothing in v0.7.1 may edit them.
 CONFIG_PY_SHA = "3fc0b1f9e95b7f05c88b4bf00f37faa6f529fd9e1c3fa000c54c137bd16d3a3d"

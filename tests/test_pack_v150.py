@@ -14,12 +14,15 @@ starts its byte pin):
   phones (``0120-123-456``, ``0800-123-4567``).
 * T58 — ``jp-card-hyphen``: the dash form ``#{4}-#{4}-#{4}-#{4}`` of the
   card number, the same column names, suggestion and leak flag as
-  jp-card, and the same ``luhn`` check.  The check folds with
-  ``dashes=False``, so hyphenated values count as ``cannot_check`` (the
-  value check never sees the dash-stripped form — recorded as a candidate
-  for the next version that touches hintpack.py); the leak token scan
-  does strip dashes for the digit shapes, so jp-card counts both forms
-  4/4 while jp-card-hyphen counts only the hyphenated tokens 2/4.
+  jp-card, and the same ``luhn`` check.  In v0.7.4 the check folded with
+  ``dashes=False``, so hyphenated values counted as ``cannot_check``
+  (recorded then as a candidate for the next version that touches
+  hintpack.py); v0.7.5 resolves it — the luhn evaluation re-folds with
+  ``dashes=True`` and strips the dashes, so the expectations moved from
+  match=2/cannot_check=2 to match=4/cannot_check=0 (see T64).  The leak
+  token scan is unchanged (shape-based, dash-stripped): jp-card counts
+  both forms 4/4 while jp-card-hyphen counts only the hyphenated tokens
+  2/4.
 * T59 — the hyphen columns' standard output on plan: one leak line per
   matching rule plus one role_mismatch — three lines where 1.4.0 printed
   one (jp-phone's shape never matched a hyphenated value).
@@ -115,7 +118,7 @@ class T57PhoneHyphen(unittest.TestCase):
     def test_rule_attributes_and_shape_matrix(self):
         from sieve_crowd.hintpack import load_packs
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.5.0")
+        self.assertEqual(packs[0].version, "1.6.0")
         rules = {r.id: r for r in packs[0].rules}
         self.assertIn("jp-phone-hyphen", rules)
         rule = rules["jp-phone-hyphen"]
@@ -194,9 +197,11 @@ class T57PhoneHyphen(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 class T58CardHyphen(unittest.TestCase):
     """T58: jp-card-hyphen — the dash form of the card number.  Same names,
-    same id suggestion, same leak flag, same luhn check; hyphenated values
-    count as cannot_check (the check folds with dashes=False) while the
-    leak token scan matches them directly."""
+    same id suggestion, same leak flag, same luhn check.  v0.7.5: the luhn
+    evaluation re-folds with dashes=True and strips the dashes before the
+    digit run (the v0.7.4 known-limitation 6 resolved), so the hyphenated
+    half is evaluated — match, not cannot_check; the leak token scan
+    (shape-based, dash-stripped) matches them directly as before."""
 
     def test_rule_attributes_and_shape_matrix(self):
         from sieve_crowd.hintpack import load_packs
@@ -214,24 +219,29 @@ class T58CardHyphen(unittest.TestCase):
             self.assertFalse(rule.shape.match(v), v)
 
     def test_checks_and_leaks_on_a_mixed_column(self):
-        # 2 hyphenated + 2 dashless luhn-valid cards: the check folds with
-        # dashes=False, so the hyphenated half is cannot_check for BOTH
-        # rules (the v0.7.4 limitation, recorded for the next hintpack.py
-        # version); the leak token scan matches the hyphenated tokens
-        # directly for jp-card-hyphen and dash-stripped for jp-card.
+        # 2 hyphenated + 2 dashless luhn-valid cards.  v0.7.5: the luhn
+        # evaluation re-folds its input with dashes=True and strips the
+        # dashes before the digit run (the v0.7.4 known-limitation 6,
+        # 3.1/3.2 of the request), so the hyphenated half is evaluated —
+        # the v0.7.4 expectations (match=2 / cannot_check=2) move to
+        # match=4 / cannot_check=0 for BOTH rules.  The leak token scan is
+        # unchanged (shape-based, dash-stripped): the hyphenated tokens
+        # match jp-card-hyphen directly and jp-card dash-stripped.
         cols = {"カード番号": CARDS_HYPHEN + CARDS_PLAIN, "age": AGES}
         roles = {"カード番号": {"role": "qi", "type": "exact"},
                  "age": {"role": "qi", "type": "exact"}}
         with tempfile.TemporaryDirectory() as d:
             rc, out, err, f = _plan(d, _csv(cols), _config(roles))
             self.assertEqual(rc, 0, err)
+            # v0.7.5 expectations (was match=2 / cannot_check=2 in v0.7.4:
+            # the hyphenated half moved from cannot_check into match)
             self.assertEqual(f["columns"]["カード番号"]["checks"],
                              [{"pack": "jp-basic", "rule": "jp-card",
-                               "kind": "luhn", "match": 2, "mismatch": 0,
-                               "cannot_check": 2},
+                               "kind": "luhn", "match": 4, "mismatch": 0,
+                               "cannot_check": 0},
                               {"pack": "jp-basic", "rule": "jp-card-hyphen",
-                               "kind": "luhn", "match": 2, "mismatch": 0,
-                               "cannot_check": 2}])
+                               "kind": "luhn", "match": 4, "mismatch": 0,
+                               "cannot_check": 0}])
             self.assertEqual([(lk["rule"], lk["count"], lk["checked"],
                                lk["skipped"])
                               for lk in f["columns"]["カード番号"]["leaks"]],

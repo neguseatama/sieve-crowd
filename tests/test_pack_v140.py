@@ -39,9 +39,9 @@ from sieve_crowd.cli import main
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# jp-basic 1.5.0 (jp-phone-hyphen, jp-card-hyphen, wider zip column names) —
-# the pin, re-measured from the bytes.
-BUILTIN_PACK_SHA = "77d257be494ad149de7361855e57f6f69ea72c3361baa685fd097a4e98d28b17"
+# jp-basic 1.6.0 (the wider phone/email/card column names) — the pin,
+# re-measured from the bytes.
+BUILTIN_PACK_SHA = "79b33a820a3d6d994ef366e1f11be53d3cbd71a4f46a3847987cff147789e34f"
 
 EMAILS = ["hina@example.co.jp", "haruto@example.ne.jp", "aoi@example.com"]
 TEL_PLAIN = ["09012345678", "0312345678", "08087654321"]   # dashless 10/11 digits
@@ -107,7 +107,7 @@ class T52IdSuggestions(unittest.TestCase):
         self.assertEqual(hashlib.sha256(BUILTIN_PACK_BYTES).hexdigest(),
                          BUILTIN_PACK_SHA)
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.5.0")
+        self.assertEqual(packs[0].version, "1.6.0")
 
     def test_four_rules_suggest_id_on_name_and_value(self):
         cols = {"email": EMAILS, "tel": TEL_PLAIN,
