@@ -4,7 +4,7 @@ Deterministic, offline, zero-dependency k-anonymity (with optional l-diversity)
 for CSV, JSON and XML tables.
 """
 
-__version__ = "0.7.4"
+__version__ = "0.7.5"
 
 from .config import Config, parse_config, parse_key  # noqa: E402
 from .engine import Result, anonymize, inspect_table, plan_table  # noqa: E402
