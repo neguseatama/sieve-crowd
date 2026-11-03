@@ -37,7 +37,7 @@ assert len(_PREF_TO_REGION) == 47
 _PACK = {
     "schema": 1,
     "id": "jp-basic",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "_comment": (
         "Built-in hints for common Japanese columns. Region classification "
         "follows the 総務省/e-Stat eight-block 地方ブロック grouping: 三重=近畿, "
@@ -65,6 +65,10 @@ _PACK = {
         "tel_number; jp-email: email_address, Eメール; jp-card and "
         "jp-card-hyphen: card_no, クレジットカード番号) - each hyphen "
         "sibling keeps the exact same names as its base rule. "
+        "1.7.0 adds jp-sex (sex/gender column names -> role qi, type "
+        "category) and jp-diagnosis (diagnosis/disease column names -> role "
+        "sensitive); both are name-only rules: no value condition, no leak, "
+        "no check, and name-only evidence never fires role_mismatch. "
         "Hints never affect the run output; edit this "
         "pack to change a standard."
     ),
@@ -183,6 +187,19 @@ _PACK = {
             "when": {"column_names": ["age", "年齢"]},
             "check": {"kind": "range", "min": 0, "max": 120},
             "suggest": {"role": "qi", "type": "numeric", "widths": [5, 10, 20]},
+        },
+        {
+            "id": "jp-sex",
+            "when": {"column_names": ["sex", "gender", "性別", "性", "男女",
+                                      "ジェンダー"]},
+            "suggest": {"role": "qi", "type": "category"},
+        },
+        {
+            "id": "jp-diagnosis",
+            "when": {"column_names": ["diagnosis", "diagnoses", "disease",
+                                      "condition", "病名", "診断", "診断名",
+                                      "疾患", "疾患名", "傷病名"]},
+            "suggest": {"role": "sensitive"},
         },
     ],
 }
