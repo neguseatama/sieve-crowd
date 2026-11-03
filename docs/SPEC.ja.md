@@ -107,6 +107,7 @@ Sieve Crowdは、人に関する表（CSV・JSON・XML）を、部外者がす�
 | `run FILE -c CONFIG (-o OUT \| --dry-run)` | 匿名化。オプション：`--key-file --k --l --max-suppression --missing-value-policy --keep-order --shuffle-seed --lang --delimiter --in-format --out-format --max-rows --max-evals --report-json --quiet --force` |
 | `plan FILE -c CONFIG` | 実行前の事前プロファイル。探索の前に：オプション `--k --l --max-suppression --missing-value-policy --max-rows --max-evals --key-file --lang --delimiter --in-format --report-json --quiet --hint-pack --no-builtin-hints --no-derived --no-hidden-chars --findings-json` |
 | `audit FILE -c CONFIG` | 表を今のまま観測 — 一般化も判定も書き込みもしない（§13）：オプション `--subject --lang --delimiter --in-format --max-rows --max-evals --findings-json --quiet` |
+| `scan INPUT [-c CONFIG] [-o OUT\|-]` | 表の今の状態を 1 枚の静的 HTML に（§15）：オプション `--hint-pack --no-builtin-hints --no-hidden-chars --subject --k --max-rows --no-derived --lang` |
 
 plan はそれ自身がレシートです（`status = "plan"`）。報告するのは**正確な値だけ**です。格子の大きさと最大の高さは設定だけから決まり
 （各QIは `levels + 1` 個の節を生む）、除外の上限は `min(n − 1, ⌊max_suppression × n⌋)`、列ごとの観察と段階0の群れの統計
@@ -244,6 +245,18 @@ JSON／XML に対して指定すると拒否されます。
 **不可視文字の観測（plan のみ）。** パックとは独立に、`plan` はすべての列のすべてのセル — plan が既に読む行なので、plan の `max_rows` が唯一の上限 — を文字表の `invisible` の種類（ゼロ幅 U+200B/200C/200D/2060/FEFF・双方向制御・タグ文字・異体字選択子）で走査します。列ごとに `rows`（1 文字以上を含む行数）・`chars`（総数）・`kinds`（現れた種類のソート済みの名前）を記録します。宣言された役割が `keep`・`qi`・`sensitive` で `rows > 0` の列に 1 件ずつ、列名のソート順で警告を出します。`id` と `drop` の列は要約の件数にのみ入ります（値がそのまま出力に残らないか、捨てられるため）。これは観測であって変更ではありません。セルは 1 つも書き換えず、出力は件数と種類の名前のみ — **セルの値もコードポイントも一切現れません**（T45 は不可視文字入りの番兵を使います）。ファイル先頭の BOM は読み込み側（`utf-8-sig`）で解釈されて数えず、セルの中の U+FEFF は数えます。
 
 警告行は従来の `  - code: …` 書式（英日）です。keep の例: `  - hidden_chars: "memo" (declared keep): 12 row(s) contain invisible characters (zero_width); they stay in the output` / 「memo」（宣言 keep）: 12 行に不可視文字（zero_width）が含まれています。出力にそのまま残ります。 `qi` では観測の意味を述べる文に変わります: `values that look identical form separate groups` / 見た目が同じ値が別のグループに分かれます（`keep`/`sensitive` は「出力にそのまま残ります」）。findings JSON は `warnings` 要素 `{code: "hidden_chars", column, declared_role, rows, chars, kinds}` とトップレベルの `hidden_chars_summary = {columns_checked, columns_flagged}` を加えます — キーの追加のみ（追加のみの契約）。findings が書かれ、走査が実行されたときに付きます。`--no-hidden-chars` は観測全体を省きます（行も要素も要約も出ません）。純 ASCII のセルは `isascii()` の高速経路を通ります。10 万行 × 10 列での費用はリリース報告に実測値があります。
+
+## 15. scan（v0.8.0、1 枚の静的 HTML）
+
+`scan INPUT [-c CONFIG] [--hint-pack FILE]... [--no-builtin-hints] [--no-hidden-chars] [--subject COLUMN] [--k N] [--max-rows N] [--no-derived] [--lang en|ja] [-o PATH|-]` は、読み取り専用のコマンドが既に持っている測定を **1 枚の静的 HTML** に組み立てます — 読み物として: "この表は、いまどう見えているか"。**新しい測定は作りません。** `-c` なしでは役割は仮のもの（列ごとのヒントパック候補のいちばん上 — v0.5.2 の順 = 根拠の強さ → 役割 → ルール id。候補のない列は `未割当（仮に keep）`、`id` の提案は「仮・出力から除く前提」と明示）。`-c` ありでは宣言された役割をそのまま使います（scan = plan + audit を 1 度の読み物に）。仮の役割の経路の内部設定はすべての qi を `exact` で一般化し、どこにも書き出しません。「次の一手」の節の下書きは提案自身の一般化器を使い、未決列は `?` にします。
+
+**ページの構成（上から下へ）。** 見出し（ベース名 — 標準入力なら "(standard input)" / 「（標準入力）」—、行数 × 列数、入力の SHA-256、版、読み込んだパックとその版、k）· 平易な文の要点（3〜5 行）· 列の一覧（役割・いちばん上の候補の根拠・候補ルール id・5 種類の所見の件数のみ — `hidden_chars`、`japanese_era`、`leak`、`mixed_form`、`role_mismatch`。書かれていない種別は 0 件）· グループの大きさ（`audit` の `size_buckets`、整数切り捨ての棒と数値）· 列ごとの観測（`audit` の `qi_columns`）· 導出関係（`--no-derived` で節を省略）· 同一対象の繰り返し（`--subject` は `audit` の C 観測を実行。なければ対象列の候補名を載せた案内）· 次の一手（設定の下書きと `plan`/`run` のコマンド例を `<pre>` で。例のファイル名は入力のベース名と `config.json` — `-c` ありなら設定のベース名。標準入力の例は `input.csv`）· この報告について。各節は 1〜2 行の「この節の読み方」で始まります。仮の qi 候補が 1 つもなければ、グループ・観測・導出関係の節を省き、案内文に置き換え、終了コードは 0 のまま。このとき `--subject` は使われません（対応づける同値類がないため）。
+
+**文言と数値。** 観測であって判定ではありません: 「安全」「危険」「合格」「不合格」はどこにもなく、ポジティブファースト。割合は千分率の切り捨て（`1000 * count // n`、`n = 0` は 0）を小数 1 桁で表示（整数演算のみ — 浮動小数点は計算されない）。棒の幅は整数パーセントの切り捨て。所見は固定順: code の昇順 → 列名（コードポイント順）→ 既定の順 — 依頼書 §11 への追認事項として承認済み。
+
+**HTML 衛生。** 1 ファイル、UTF-8（BOM なし）、`\n` 改行、`<html lang>` は `--lang` に従属。`<script>`、`on*=` 属性、`src=`/`href=`/`url(`/`@import`/`<link>` は一切なし。CSP meta は `default-src 'none'; style-src 'unsafe-inline'`。インライン CSS のみ、`prefers-color-scheme` によるライト/ダーク、印刷・スマホ幅対応、中性色（色は情報を運ばない — 棒には必ず数値が併記される）。ユーザー由来の文字列（列名・ベース名・パック id と版・ルール id・下書き JSON）は HTML エスケープ — `= ( ) @` を含むので、悪意ある名前は禁じられたトークンを作れない — され、不可視・制御文字は `<U+XXXX>` で表示（文字表の invisible 分類＋ C0（タブと改行を除く）＋ C1＋ DEL）。列名の表示は最大 120 コードポイント（表示のみ — 下書きは全文を保つのでコピーペーストに耐える）。日時・乱数・環境依存の値（パス・ホスト名・ロケール）はなく、ファイル名はベース名のみ。同じ入力はバイト同一。セルの値は一切現れない — ほかの報告と同じ番兵規則がページ全体に適用されます。
+
+**入出力と終了コード。** 出力の既定は `INPUT` の最後の拡張子を `.scan.html` に置き換えたもの（`people.tar.csv` → `people.tar.scan.html`）で、アトミックかつ無条件に上書き — `--force` は存在しない。`-o PATH` は任意のパス、`-o -` は標準出力。出力先が解決後に入力ファイルまたは `-c` のファイルと同じになるとき、および入力が標準入力で `-o` がないときは拒否（終了コード 2、何も書かない）。オプションは plan/audit と同じ意味に従います: `--k` は仮の役割用の k（既定 5。`-c` ありでは plan と同じ規則で設定の k に優先）、`--max-rows`（既定 200,000）は audit と同じ意味 — 観測はすべての行を読み、表が大きいときはページがその旨を記録 — `--no-hidden-chars` は不可視文字の観測を省く（件数は keep/qi/sensitive の列にのみ付き、仮の `id` 列には付かない）、`--hint-pack`/`--no-builtin-hints` は §12 どおり。`--delimiter`/`--in-format` は存在しません（標準入力は CSV、それ以外は拡張子で判定）。終了コード: 0 成功（所見ゼロの表も含む）· 1 I/O · 2 使い方/設定/入力。stderr の完了報告は 1 行（出力先と件数の要約、英日）。ブラウザは開かない。ページを読む側にも書き換えは起きない。`scan` モジュール（`sieve_crowd/scan.py`）は scan ハンドラだけが import し — `run`・`plan`・`inspect`・`audit` は決して import しません（T67 が subprocess 検査を拡張。テスト T67〜T77）。
 
 ## 付録　独自に決めたこと
 

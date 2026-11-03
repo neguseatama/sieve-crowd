@@ -1,4 +1,4 @@
-# Sieve Crowd v0.7.5
+# Sieve Crowd v0.8.0
 
 [English](README.md) | 日本語
 
@@ -160,6 +160,23 @@ subject 列は、設定にあり役割が `qi`/`sensitive` 以外の列（`id` �
 
 ---
 
+## 📄 scan: 表の全体像を 1 ページに（v0.8.0）
+
+`sieve-crowd scan INPUT` は、"この表は、いまどう見えているか" を **1 枚の静的 HTML** にまとめます。読み物であってダッシュボードではありません。設定なしで実行すると、ヒントパックの候補から **仮の役割** を暫時置きます（v0.5.2 の候補順のいちばん上。候補のない列は `未割当（仮に keep）`、`id` の提案は「仮・出力から除く前提」であることが明示されます）。`-c CONFIG` を渡すと、宣言された役割をそのまま使い、ページは plan + audit を 1 度に読める形になります。何も実行されず、探索もしません。ページは CSP `default-src 'none'` でインラインスタイルのみ。ライト/ダーク対応、印刷・スマホ幅対応、色は情報を運ばない中性色です。セルの値は一切載らず、載るのは列名・件数・割合・ルール id・ファイル名・入力の SHA-256 だけ。同じ入力からは常にバイト同一（日時も環境の値も載りません）。
+
+```bash
+sieve-crowd scan people.csv                                  # 仮の役割で people.scan.html へ
+sieve-crowd scan people.csv -c config.json                   # 宣言された役割をそのまま
+sieve-crowd scan people.csv -o report.html --lang ja         # 出力先と言語は自由
+sieve-crowd scan people.csv --subject id                     # 行の背後の人も観測
+```
+
+ページは上から下へ読みます: 平易な文の要点。列の一覧（役割・根拠・候補ルール id・所見の件数 — `hidden_chars`、`japanese_era`、`leak`、`mixed_form`、`role_mismatch` を、code → 列名（コードポイント順）→ 既定の順の固定順で）。整数切り捨ての棒と数値によるグループの大きさ。列ごとの観測（`audit` のもの）。導出関係（`--no-derived` で省略）。同一対象の繰り返し（`--subject`、または対象列の候補名を載せた案内）。**設定の下書き**（未決列は `?`、それ以外は提案の一般化器）と `plan`/`run` のコマンド例。そして上の規則を明記した「この報告について」。各節は 1〜2 行の「この節の読み方」で始まり、文言は観測の側にとどまります — 「安全」「危険」「合格」「不合格」はどこにもありません。割合は千分率の切り捨て（整数演算のみ）を小数 1 桁の百分率で示します。
+
+準識別子の候補が 1 つもなければ、グループ・観測・導出関係の節を省き、案内文に置き換えます — 終了コードは 0 のままです。`--k` は仮の役割用の k（既定 5。`-c` と併用時は plan と同じ規則で設定の k に優先）、`--max-rows` は audit と同じ意味（観測はすべての行を読み、表が大きいときはその旨を記録）、`--no-hidden-chars` で不可視文字の件数を省きます（件数は keep/qi/sensitive の列にのみ付き、仮の `id` 列には付きません）。出力先は `INPUT.scan.html` — `people.tar.csv` なら `people.tar.scan.html` — で、`--force` なしで無条件にアトミック上書きします。`-o PATH`、`-o -`（標準出力）も使えます。入力ファイルと設定ファイルは決して上書きせず、`-o` のない標準入力も拒否します（いずれも終了コード 2、何も書きません）。終了コード: 0 成功・1 入出力・2 使い方/設定/入力。悪意のある列名はマークアップを作れません（エスケープし、不可視・制御文字は `<U+XXXX>` で表示 — chartable の invisible 分類＋タブと改行を除く C0＋C1＋DEL）。120 コードポイントを超える列名は表示では省略し、下書きには全文が入ります。
+
+---
+
 ## 🧪 ヒントパック（組み込みは既定オン）
 
 `inspect` と `plan` は**ヒントパック**（JSON ファイル）を読み込みます。列への役割・一般化器の提案と値の形の検査を行い、匿名化には一切触れません。v0.5.1 から組み込みの `jp-basic` パックは**既定で読み込まれ**ます。`--no-builtin-hints` で除外します。`run` はパックを読みません（run のパスは v0.4.0 とバイト単位で同一です。`--no-builtin-hints` を付けてパックを指定しなければ、inspect のテンプレートまで v0.4.0 とバイト一致のままです）。
@@ -209,6 +226,7 @@ sieve-crowd inspect people.csv --config-out t.json --no-builtin-hints  # v0.4.0 
 - `--dry-run`: データを書き出さず、匿名化の測定とリスク評価のみを実行
 - `sieve-crowd plan people.csv -c config.json`: 探索空間・除外の上限・警告、そして keep 列 × 準識別子の導出関係（`--no-derived` で省略）と不可視文字の観測（`--no-hidden-chars` で省略）の事前見積り（探索なし、出力なし）
 - `sieve-crowd audit people.csv -c config.json [--subject COLUMN]`: 現在の表を観測 — 同値類、QI 列ごとの観測、同一対象の繰り返し（整数のみ。探索なし、出力なし）
+- `sieve-crowd scan people.csv [-c config.json] [-o report.html]`: 現在の状態を 1 枚の静的 HTML に — 仮の（または宣言された）役割、グループの大きさ、列ごとの観測、導出関係、同一対象の繰り返し、設定の下書き（探索なし、セルの値なし、同じ入力はバイト同一）
 - `--lang ja`: 日本語のレシートを出力（既定は英語、JSON出力も可）
 - `--in-format` / `--out-format`: 入出力形式の明示指定（csv, json, xml）
 - `sieve-crowd keygen -o key.txt`: 仮名化（pseudonymize）用の暗号鍵を生成
@@ -258,6 +276,7 @@ python -m unittest discover -s tests -v
 
 | 版 | 主な内容 |
 | :--- | :--- |
+| 0.8.0 | `scan` サブコマンド: 1 枚の静的 HTML — "いまどう見えているか" — を、`inspect`/`plan`/`audit` が既に持っている測定の組み立てで実現（ヒントパックの候補から仮の役割、または `-c` の役割をそのまま。`audit` のグループの大きさと QI 列ごとの観測。`derived` の keep × qi の組。不可視文字の件数。未決列を `?` にした設定の下書きと `plan`/`run` のコマンド例）。新しい測定は作らず、セルの値も出さず、判定語も使わない。同じ入力はバイト同一（日時・環境値なし）。CSP `default-src 'none'` でインラインスタイルのみ、中性色、割合は整数のみ（千分率切り捨て、小数 1 桁の百分率）。出力は `INPUT.scan.html`（アトミック・無条件上書き、`--force` なし）。`-o` のない標準入力、入力/設定と同じ出力先は終了コード 2。所見は固定順（code → 列名コードポイント順 → 既定の順）。不可視・制御文字は `<U+XXXX>` 表示（chartable invisible＋タブと改行を除く C0＋C1＋DEL）。列名は表示のみ 120 コードポイントで省略（下書きは全文）。悪意ある名前でもマークアップは作れない。`run`/`plan`/`inspect`/`audit` は `scan` を import しない（T67 が subprocess 検査を拡張。テスト T67〜T77）。新規 `sieve_crowd/scan.py`。凍結コアはバイト同一。 |
 | 0.7.5 | jp-basic 1.6.0: 電話・メール・カードの定番の列名を追加 — `jp-phone`/`jp-phone-hyphen` は 8 名から 13 名へ（`携帯番号`・`電話番号1`・`電話番号2`・`phone_number`・`tel_number`）、`jp-email` は 6 名から 8 名へ（`email_address`・`Eメール`）、`jp-card`/`jp-card-hyphen` は 5 名から 7 名へ（`card_no`・`クレジットカード番号`）。ハイフン形の兄弟ルールは基ルールと同じ名前を保ち、追加名はほかのルールと衝突しません。ハイフン付きのカード番号も luhn で検査（v0.7.4 の既知の限界 6 を解消 — luhn の評価だけが折り畳みの後にダッシュを外し、半角数字とハイフンだけからなる値を検査します。名前一致のハイフンのみ列では `jp-card` の証拠が name から name+value に昇格します）。`hintpack.py` のバイト pin は T62 から T66 が引き継ぎ。`run`/`config.py`/`engine.py`/`audit.py`/`derived.py`/`chartable.py`/`hidden_chars.py` はバイト同一。 |
 | 0.7.4 | jp-basic 1.5.0: `jp-phone-hyphen`（`#{2,4}-#{2,4}-#{3,4}`）と `jp-card-hyphen`（`#{4}-#{4}-#{4}-#{4}`）を追加 — どちらも兄弟ルール（`jp-phone`/`jp-card`）と同じ列名・同じ `role: id` の提案・同じ leak。カードの luhn 検査も引き継ぐが、値の検査はダッシュを畳まないためハイフン付きの値は `cannot_check`（既知の限界 6 に記録 — v0.7.5 で解消）。`jp-zip`/`jp-zip-hyphen` の列名を 6 名から 13 名へ（`郵便番号`・`〒番号`・`郵便番号1`・`郵便番号2`・`zip_code`・`postal_code`・`post_code` を追加）。`hintpack.py` を凍結対象に追加（T62 がバイトを固定）。ハイフン形の電話・カード列（keep/qi/sensitive 宣言）は leak 2 行＋role_mismatch 1 行が標準の出力。`run`/`config.py`/`engine.py`/`audit.py`/`derived.py`/`chartable.py`/`hidden_chars.py` はバイト同一。 |
 | 0.7.3 | jp-basic 1.4.0: `jp-email`/`jp-phone`/`jp-mynumber`/`jp-card` が `role: id` を提案（`when`/`check`/`leak` は不変・依頼の列名を追加 — `mail_address`/`メールアドレス`、`電話番号`/`携帯電話`、`my_number`/`mynumber`/`マイナンバー`/`個人番号`、`card`/`card_number`/`credit_card`/`カード番号`/`クレジットカード`）、さらに `jp-zip-hyphen` がダッシュ形 `#{3}-#{4}` を認識（`prefix` 4 を提案 — `#{7}` と同じ部分レベル・残り桁数 6・5・4・3・ダッシュは決して隠れない）。提案は列名か値の合図が必要になり、無関係な列には候補が付かない。`role_mismatch` は `id` の提案にも出る: keep/qi/sensitive で name+value 証拠 — 列名が一致しない列は leak 検査の担当。`run`/`config.py`/`engine.py`/`audit.py`/`derived.py`/`chartable.py`/`hidden_chars.py` はバイト同一。 |
