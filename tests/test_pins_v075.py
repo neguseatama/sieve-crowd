@@ -28,10 +28,10 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Golden SHAs, unchanged for v0.7.5 (TEMPLATE_SHA2 stays — see the docstring).
 RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae040061500e"
 TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159"
-TEMPLATE_SHA2 = "870a30b80ad93021160c38e38c5c0841234d7dc0035556b9fa5f6703d177d07b"
-# jp-basic 1.6.0: the pack bytes change on purpose (the wider phone/email/
-# card column names).
-BUILTIN_PACK_SHA = "79b33a820a3d6d994ef366e1f11be53d3cbd71a4f46a3847987cff147789e34f"
+TEMPLATE_SHA2 = "0d5c35d82dc54004ad7f34b80be69103a80a0d20dccc4dae22f7e6412ba6c657"
+# jp-basic 1.7.0 (v0.8.2): the pack bytes change on purpose (the sex/
+# diagnosis name-only rules; 1.6.0 added the wider phone/email/card names).
+BUILTIN_PACK_SHA = "1fae5827a7048ca1e4b92c7d12792a755f5b21e63d6392bc2a1fbdb4e3dc66c4"
 CHARTABLE_SHA = "c5ae4757bc9d07a2dcd1507d662460c3412c932d73318e54912569608242e605"
 # The frozen cores: byte-for-byte, nothing in v0.7.5 may edit them — except
 # hintpack.py, whose luhn preprocessing changes on purpose (T66 starts the
@@ -85,7 +85,7 @@ class T66Pins(unittest.TestCase):
         self.assertEqual(hashlib.sha256(BUILTIN_PACK_BYTES).hexdigest(),
                          BUILTIN_PACK_SHA)
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.6.0")
+        self.assertEqual(packs[0].version, "1.7.0")
 
     def test_chartable_file_is_pinned(self):
         with open(os.path.join(REPO, "sieve_crowd", "chartable_v1.json"), "rb") as fh:

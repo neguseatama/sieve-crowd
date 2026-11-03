@@ -39,9 +39,9 @@ from sieve_crowd.cli import main
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# jp-basic 1.6.0 (the wider phone/email/card column names) — the pin,
+# jp-basic 1.7.0 (v0.8.2: the sex/diagnosis name-only rules) — the pin,
 # re-measured from the bytes.
-BUILTIN_PACK_SHA = "79b33a820a3d6d994ef366e1f11be53d3cbd71a4f46a3847987cff147789e34f"
+BUILTIN_PACK_SHA = "1fae5827a7048ca1e4b92c7d12792a755f5b21e63d6392bc2a1fbdb4e3dc66c4"
 
 EMAILS = ["hina@example.co.jp", "haruto@example.ne.jp", "aoi@example.com"]
 TEL_PLAIN = ["09012345678", "0312345678", "08087654321"]   # dashless 10/11 digits
@@ -107,7 +107,7 @@ class T52IdSuggestions(unittest.TestCase):
         self.assertEqual(hashlib.sha256(BUILTIN_PACK_BYTES).hexdigest(),
                          BUILTIN_PACK_SHA)
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.6.0")
+        self.assertEqual(packs[0].version, "1.7.0")
 
     def test_four_rules_suggest_id_on_name_and_value(self):
         cols = {"email": EMAILS, "tel": TEL_PLAIN,
@@ -167,22 +167,25 @@ class T52IdSuggestions(unittest.TestCase):
                               _cands(f, col), col)
 
     def test_unrelated_columns_never_gain_a_candidate(self):
-        # the gate: a suggestion needs a name or a value signal.  sex and
-        # diagnosis produce no findings at all; the prose column still gets
-        # its leak count but no candidate (jp-email is a leak rule with a
-        # suggestion — without the gate it would carry a bogus one).
-        cols = {"sex": ["M", "F", "M"], "diagnosis": ["flu", "none", "flu"],
+        # the gate: a suggestion needs a name or a value signal.  color and
+        # weather produce no findings at all (this test used sex/diagnosis
+        # until jp-basic 1.7.0 gave them their own name-only rules — they
+        # are real suggestions now, covered by test_pack_v170); the prose
+        # column still gets its leak count but no candidate (jp-email is a
+        # leak rule with a suggestion — without the gate it would carry a
+        # bogus one).
+        cols = {"color": ["red", "blue", "red"], "weather": ["sun", "rain", "sun"],
                 "メモ": ["連絡先は hina@example.co.jp です", "メモのみ", "メモのみ"],
                 "age": AGES}
-        roles = {"sex": {"role": "qi", "type": "exact"},
-                 "diagnosis": {"role": "sensitive"},
+        roles = {"color": {"role": "qi", "type": "exact"},
+                 "weather": {"role": "sensitive"},
                  "メモ": {"role": "keep"},
                  "age": {"role": "qi", "type": "exact"}}
         with tempfile.TemporaryDirectory() as d:
             rc, out, err, f = _plan(d, _csv(cols), _config(roles))
             self.assertEqual(rc, 0, err)
-            self.assertNotIn("sex", f["columns"])
-            self.assertNotIn("diagnosis", f["columns"])
+            self.assertNotIn("color", f["columns"])
+            self.assertNotIn("weather", f["columns"])
             memo = f["columns"]["メモ"]
             self.assertIn("leaks", memo)
             self.assertEqual([lk["rule"] for lk in memo["leaks"]], ["jp-email"])

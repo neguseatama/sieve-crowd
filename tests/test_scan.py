@@ -264,9 +264,9 @@ class T69ScanDeterminismAndHygiene(ScanCase):
         self.assertIsNone(re.search(r"\bon[a-z]+\s*=", low))
         self.assertIn('<meta http-equiv="Content-Security-Policy" '
                       "content=\"default-src 'none'; style-src 'unsafe-inline'\">", html1)
-        self.assertIn("Sieve Crowd 0.8.1", html1)
+        self.assertIn("Sieve Crowd 0.8.2", html1)
         self.assertIn("jp-basic", html1)
-        self.assertIn("1.6.0", html1)
+        self.assertIn("1.7.0", html1)
 
     def test_lang_attribute_follows_the_flag(self):
         src = self.write("people.csv", CSV5)
@@ -308,14 +308,18 @@ class T71ScanProvisionalRoles(ScanCase):
         rc, _, html = self.scan(src, "--lang", "ja")
         self.assertEqual(rc, 0)
         self.assertIn("id（仮・出力から除く前提）", html)     # name -> id (provisional)
-        self.assertIn("未割当（仮に keep）", html)            # sex, diagnosis
-        self.assertEqual(html.count("未割当（仮に keep）"), 3)   # summary + 2 column rows
-        self.assertIn("qi 2 列・id 1 列・未割当（仮に keep）2 列", html)   # disjoint breakdown
+        # v0.8.2: jp-sex/jp-diagnosis suggest on the CSV5 names too, so no
+        # column stays unassigned (the unassigned path lives in T70/T74/T75)
+        self.assertNotIn("未割当", html)
+        self.assertIn("qi 3 列・id 1 列・sensitive 1 列", html)   # disjoint breakdown
         self.assertNotIn("keep 2 列", html)                 # the double count is gone
         self.assertEqual(html.count(">name+value<"), 2)     # age, zip evidence
         self.assertIn("jp-person-name", html)
         self.assertIn("jp-age", html)
         self.assertIn("jp-zip, jp-zip-hyphen", html)        # candidate rule ids
+        self.assertIn(">sex</th><td>qi</td><td>name</td><td>jp-sex</td>", html)
+        self.assertIn(">diagnosis</th><td>sensitive</td><td>name</td>"
+                      "<td>jp-diagnosis</td>", html)
         for probe in (">age</th>", ">diagnosis</th>", ">name</th>",
                       ">sex</th>", ">zip</th>"):            # codepoint row order
             self.assertIn(probe, html)
@@ -330,7 +334,10 @@ class T71ScanProvisionalRoles(ScanCase):
         self.assertIn('&quot;role&quot;: &quot;id&quot;', html)
         self.assertIn('&quot;type&quot;: &quot;prefix&quot;', html)
         self.assertIn('&quot;length&quot;: 4', html)        # the zip suggestion
-        self.assertIn('&quot;role&quot;: &quot;?&quot;', html)   # unassigned columns
+        # v0.8.2: every CSV5 column carries a suggestion, so no '?' remains
+        self.assertNotIn('&quot;role&quot;: &quot;?&quot;', html)
+        self.assertIn('&quot;role&quot;: &quot;sensitive&quot;', html)   # jp-diagnosis
+        self.assertIn('&quot;type&quot;: &quot;category&quot;', html)      # jp-sex (no hierarchy)
         self.assertIn("sieve-crowd plan people.csv -c config.json", html)
         self.assertIn("sieve-crowd run people.csv -c config.json -o people.output.csv", html)
 
@@ -455,9 +462,12 @@ class T75ScanEscapingTruncationAndBars(ScanCase):
         self.assertIn("z" * 130, html)                     # full name in the draft
 
     def test_percent_and_bar_widths_are_integer_only(self):
-        lines = ["age,sex"]
+        # v0.8.2 note: this fixture used a `sex` column until jp-basic 1.7.0
+        # made sex a real qi candidate (which would split these groups);
+        # `color` matches no rule and keeps the age-only grouping.
+        lines = ["age,color"]
         for i in range(10):
-            lines.append(f"{30 if i < 3 else 40},{'M' if i % 2 else 'F'}")
+            lines.append(f"{30 if i < 3 else 40},{'red' if i % 2 else 'blue'}")
         src = self.write("small.csv", "\n".join(lines) + "\n")
         rc, _, html = self.scan(src)
         self.assertEqual(rc, 0)

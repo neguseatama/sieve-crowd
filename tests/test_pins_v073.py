@@ -28,11 +28,11 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Golden SHAs, re-pinned for v0.7.3 (RUN_TABLE_SHA and TEMPLATE_SHA unchanged).
 RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae040061500e"
 TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159"
-# jp-basic 1.6.0 (v0.7.5): the pack sha changes on purpose (the wider
-# phone/email/card column names); TEMPLATE_SHA2 keeps its v0.7.3 value
-# this time.
-TEMPLATE_SHA2 = "870a30b80ad93021160c38e38c5c0841234d7dc0035556b9fa5f6703d177d07b"
-BUILTIN_PACK_SHA = "79b33a820a3d6d994ef366e1f11be53d3cbd71a4f46a3847987cff147789e34f"
+# jp-basic 1.7.0 (v0.8.2): the pack sha changes on purpose (the sex/
+# diagnosis name-only rules); TEMPLATE_SHA2 kept its v0.7.3 value until
+# v0.8.2 (people.csv's sex/diagnosis gain suggestions) — re-pinned there.
+TEMPLATE_SHA2 = "0d5c35d82dc54004ad7f34b80be69103a80a0d20dccc4dae22f7e6412ba6c657"
+BUILTIN_PACK_SHA = "1fae5827a7048ca1e4b92c7d12792a755f5b21e63d6392bc2a1fbdb4e3dc66c4"
 CHARTABLE_SHA = "c5ae4757bc9d07a2dcd1507d662460c3412c932d73318e54912569608242e605"
 # The frozen cores: byte-for-byte, nothing in v0.7.3 may edit them.
 CONFIG_PY_SHA = "3fc0b1f9e95b7f05c88b4bf00f37faa6f529fd9e1c3fa000c54c137bd16d3a3d"
@@ -82,7 +82,7 @@ class T56Pins(unittest.TestCase):
         self.assertEqual(hashlib.sha256(BUILTIN_PACK_BYTES).hexdigest(),
                          BUILTIN_PACK_SHA)
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.6.0")
+        self.assertEqual(packs[0].version, "1.7.0")
 
     def test_chartable_file_is_pinned(self):
         with open(os.path.join(REPO, "sieve_crowd", "chartable_v1.json"), "rb") as fh:

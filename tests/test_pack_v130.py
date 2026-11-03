@@ -22,9 +22,9 @@ from sieve_crowd.cli import main
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# jp-basic 1.6.0 (the wider phone/email/card column names) — the pin,
+# jp-basic 1.7.0 (v0.8.2: the sex/diagnosis name-only rules) — the pin,
 # re-measured from the bytes.
-BUILTIN_PACK_SHA = "79b33a820a3d6d994ef366e1f11be53d3cbd71a4f46a3847987cff147789e34f"
+BUILTIN_PACK_SHA = "1fae5827a7048ca1e4b92c7d12792a755f5b21e63d6392bc2a1fbdb4e3dc66c4"
 
 # The name lists of the two new rules.
 PERSON_NAME_COLUMNS = ["name", "full_name", "fullname", "first_name", "last_name",
@@ -90,7 +90,7 @@ class T48JpPersonNameAndAddress(unittest.TestCase):
         self.assertEqual(hashlib.sha256(BUILTIN_PACK_BYTES).hexdigest(),
                          BUILTIN_PACK_SHA)
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.6.0")
+        self.assertEqual(packs[0].version, "1.7.0")
 
     def test_person_name_columns_suggest_id(self):
         csv = _csv(PERSON_NAME_COLUMNS)

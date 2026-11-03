@@ -118,7 +118,7 @@ class T57PhoneHyphen(unittest.TestCase):
     def test_rule_attributes_and_shape_matrix(self):
         from sieve_crowd.hintpack import load_packs
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.6.0")
+        self.assertEqual(packs[0].version, "1.7.0")
         rules = {r.id: r for r in packs[0].rules}
         self.assertIn("jp-phone-hyphen", rules)
         rule = rules["jp-phone-hyphen"]

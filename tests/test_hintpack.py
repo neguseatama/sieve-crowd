@@ -27,13 +27,14 @@ TEMPLATE_SHA = "66e7eaf4a42d86b15b422eee39fca550b9c7ada0049ba4b6f7dd31e6cc0c4159
 # New pin (v0.5.1, updated v0.6.0 for jp-birthdate, v0.7.2 for jp-person-name
 # and jp-address, v0.7.3 for jp-zip-hyphen): the default-on (builtin loaded)
 # inspect template, people.csv.
-TEMPLATE_SHA2 = "870a30b80ad93021160c38e38c5c0841234d7dc0035556b9fa5f6703d177d07b"
+TEMPLATE_SHA2 = "0d5c35d82dc54004ad7f34b80be69103a80a0d20dccc4dae22f7e6412ba6c657"
 # New pin (v0.5.1, updated v0.6.0 for jp-birthdate, v0.7.1 for jp-name-kana,
 # v0.7.2 for jp-person-name and jp-address, v0.7.3 for the id suggestions, the
 # requested column names and jp-zip-hyphen, v0.7.4 for jp-phone-hyphen,
 # jp-card-hyphen and the wider zip column names, v0.7.5 for the wider
-# phone/email/card column names): the builtin jp-basic 1.6.0 pack bytes.
-BUILTIN_PACK_SHA = "79b33a820a3d6d994ef366e1f11be53d3cbd71a4f46a3847987cff147789e34f"
+# phone/email/card column names, v0.8.2 for the sex/diagnosis name-only
+# rules): the builtin jp-basic 1.7.0 pack bytes.
+BUILTIN_PACK_SHA = "1fae5827a7048ca1e4b92c7d12792a755f5b21e63d6392bc2a1fbdb4e3dc66c4"
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -692,7 +693,7 @@ class T18PackInfo(unittest.TestCase):
             self.assertEqual([p["id"] for p in info], ["jp-basic", "mypack"])  # load order
             b = info[0]
             self.assertEqual(b["source"], "builtin")
-            self.assertEqual(b["version"], "1.6.0")     # v0.7.5: the wider phone/email/card names
+            self.assertEqual(b["version"], "1.7.0")     # v0.8.2: the sex/diagnosis name-only rules
             self.assertEqual(set(b), {"id", "version", "source", "sha256"})
             m = info[1]
             self.assertEqual(m["source"], "file")
@@ -1010,7 +1011,7 @@ class T26JpBirthdate(unittest.TestCase):
             call("inspect", src, "--findings-json", fj)
             with open(fj) as fh:
                 f = json.load(fh)
-            self.assertEqual(f["pack_info"][0]["version"], "1.6.0")
+            self.assertEqual(f["pack_info"][0]["version"], "1.7.0")
             self.assertEqual(f["pack_info"][0]["sha256"], BUILTIN_PACK_SHA)
 
 

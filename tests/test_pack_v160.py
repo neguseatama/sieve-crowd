@@ -113,7 +113,7 @@ class T63WiderNames(unittest.TestCase):
     def test_name_counts_and_sibling_equality(self):
         from sieve_crowd.hintpack import load_packs
         packs = load_packs([], include_builtin=True)
-        self.assertEqual(packs[0].version, "1.6.0")
+        self.assertEqual(packs[0].version, "1.7.0")
         rules = {r.id: r for r in packs[0].rules}
         # 13 / 13 / 8 / 7 / 7 (the request's table)
         self.assertEqual(len(rules["jp-phone"].column_names), 13)
