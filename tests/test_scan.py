@@ -264,7 +264,7 @@ class T69ScanDeterminismAndHygiene(ScanCase):
         self.assertIsNone(re.search(r"\bon[a-z]+\s*=", low))
         self.assertIn('<meta http-equiv="Content-Security-Policy" '
                       "content=\"default-src 'none'; style-src 'unsafe-inline'\">", html1)
-        self.assertIn("Sieve Crowd 0.8.0", html1)
+        self.assertIn("Sieve Crowd 0.8.1", html1)
         self.assertIn("jp-basic", html1)
         self.assertIn("1.6.0", html1)
 
@@ -309,7 +309,9 @@ class T71ScanProvisionalRoles(ScanCase):
         self.assertEqual(rc, 0)
         self.assertIn("id（仮・出力から除く前提）", html)     # name -> id (provisional)
         self.assertIn("未割当（仮に keep）", html)            # sex, diagnosis
-        self.assertEqual(html.count("未割当（仮に keep）"), 2)
+        self.assertEqual(html.count("未割当（仮に keep）"), 3)   # summary + 2 column rows
+        self.assertIn("qi 2 列・id 1 列・未割当（仮に keep）2 列", html)   # disjoint breakdown
+        self.assertNotIn("keep 2 列", html)                 # the double count is gone
         self.assertEqual(html.count(">name+value<"), 2)     # age, zip evidence
         self.assertIn("jp-person-name", html)
         self.assertIn("jp-age", html)
@@ -345,6 +347,7 @@ class T72ScanWithConfig(ScanCase):
         self.assertEqual(rc, 0)
         self.assertNotIn("未割当", html)
         self.assertNotIn("（仮", html)
+        self.assertIn("qi 2, id 1, sensitive 1 column(s)", html)
         self.assertIn("&quot;k&quot;: 3", html)
         self.assertIn("&quot;l&quot;: 2", html)
         self.assertIn("&quot;max_suppression&quot;: 0.05", html)
@@ -371,6 +374,7 @@ class T72ScanWithConfig(ScanCase):
         rc, _, html = self.scan(src, "-c", cfg)
         self.assertEqual(rc, 0)
         self.assertIn("role_mismatch 1", html)             # zip suggests qi
+        self.assertIn("sensitive 1, keep 1 column(s)", html)   # declared keep, counted once
 
 
 class T73ScanNoQiCandidates(ScanCase):
@@ -476,6 +480,10 @@ class T76ScanLanguagesAndIo(ScanCase):
         self.assertIn("要点", html)
         self.assertIn("列の一覧", html)
         self.assertIn("グループの大きさ", html)
+        about = html[html.index('id="about"'):]            # the three cautions
+        self.assertIn("観測であって、安全かどうかの判定ではありません", about)
+        self.assertIn("1 人が 1 行の表であることを前提にしています", about)
+        self.assertIn("k-匿名性は、別の情報との照合や", about)
         self.assertEqual(err.count("\n"), 1)               # one line only
         self.assertIn("行、", err)
         self.assertIn("people.scan.html", err)
@@ -486,6 +494,10 @@ class T76ScanLanguagesAndIo(ScanCase):
         self.assertEqual(rc, 0)
         self.assertIn("Summary", html)
         self.assertIn("Group sizes", html)
+        about = html[html.index('id="about"'):]            # the three cautions
+        self.assertIn("not a judgment of safety", about)
+        self.assertIn("one row per person", about)
+        self.assertIn("k-anonymity does not prevent", about)
         self.assertEqual(err.count("\n"), 1)
         self.assertIn("scan: wrote", err)
 
