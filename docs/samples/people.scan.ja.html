@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<title>scan — people.csv</title>
+<style>
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { margin: 0 auto; padding: 1rem 1.25rem 3rem; max-width: 64rem; line-height: 1.6; }
+h1 { font-size: 1.35rem; }
+h2 { font-size: 1.1rem; margin-top: 2rem; }
+.meta, .howto, caption { color: #555; font-size: 0.9rem; margin: 0.2rem 0; }
+.howto { margin-bottom: 0.6rem; }
+table { border-collapse: collapse; margin: 0.5rem 0; width: 100%; }
+caption { caption-side: top; text-align: left; padding: 0.2rem 0; }
+th, td { border: 1px solid #aaa; padding: 0.2rem 0.5rem; text-align: left; vertical-align: top; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bar { min-width: 8rem; width: 40%; }
+.fill { background: #808080; height: 0.75rem; }
+pre { border: 1px solid #aaa; padding: 0.5rem; overflow-x: auto; font-size: 0.85rem; }
+ul { padding-left: 1.25rem; }
+@media (max-width: 40rem) { body { padding: 0.75rem; } .bar { min-width: 4rem; } }
+@media print { body { max-width: none; } h2 { break-after: avoid; } }
+@media (prefers-color-scheme: dark) {
+  body { background: #141414; color: #e8e8e8; }
+  .meta, .howto, caption { color: #b0b0b0; }
+  th, td, pre { border-color: #555; }
+  .fill { background: #909090; }
+}
+
+</style>
+</head>
+<body>
+<header>
+<h1>いまどう見えているか — people.csv</h1>
+<p class="meta">600 行 × 6 列</p>
+<p class="meta">入力 SHA-256: cf32626e9b45317efad3a35a8ff3721bd3b3dfe876422034a124d18774a289e9</p>
+<p class="meta">Sieve Crowd 0.8.2</p>
+<p class="meta">ヒントパック: jp-basic 1.7.0（内蔵）</p>
+<p class="meta">k = 5</p>
+</header>
+<main>
+<section id="summary">
+<h2>要点</h2>
+<p class="howto">この節の読み方: 表全体のあらましを、短い文と整数だけで書いています。</p>
+<p>この表は 600 行 × 6 列です。</p>
+<p>列の役割は仮の割り当てで、qi 4 列・id 1 列・sensitive 1 列です。</p>
+<p>同じ準識別子の値の組を持つ行の集まり（グループ）は 600 個で、最小 1 行です。k = 5 未満のグループに属する行は 100.0% です。</p>
+<p>次の一手に設定の下書きとコマンドの例を用意しました。</p>
+</section>
+<section id="columns">
+<h2>列の一覧</h2>
+<p class="howto">この節の読み方: 役割は現時点の仮の割り当てです。根拠は、いちばん上の候補をパックが列の名前と値のどちらから判断したかを示します。所見は種類ごとの件数で、何も書かれていない種別は 0 件です。</p>
+<table>
+<caption>列ごとの役割・根拠・候補と所見の件数</caption>
+<thead><tr><th scope="col">列</th><th scope="col">役割</th><th scope="col">根拠</th><th scope="col">候補ルール</th><th scope="col">所見（件数）</th></tr></thead>
+<tbody>
+<tr><th scope="row">age</th><td>qi</td><td>name+value</td><td>jp-age</td><td>—</td></tr>
+<tr><th scope="row">birth_date</th><td>qi</td><td>name+value</td><td>jp-birthdate</td><td>—</td></tr>
+<tr><th scope="row">diagnosis</th><td>sensitive</td><td>name</td><td>jp-diagnosis</td><td>—</td></tr>
+<tr><th scope="row">name</th><td>id（仮・出力から除く前提）</td><td>name</td><td>jp-person-name</td><td>—</td></tr>
+<tr><th scope="row">sex</th><td>qi</td><td>name</td><td>jp-sex</td><td>—</td></tr>
+<tr><th scope="row">zip</th><td>qi</td><td>name+value</td><td>jp-zip, jp-zip-hyphen</td><td>—</td></tr>
+</tbody>
+</table>
+<p>不可視文字の観察は 6 列を調べ、0 列に所見がありました。</p>
+</section>
+<section id="groups">
+<h2>グループの大きさ</h2>
+<p class="howto">この節の読み方: 同じ準識別子の値の組を持つ行の集まり（グループ）を、大きさごとに数えています。棒の長さは全体の中の割合（整数パーセント、切り捨て）の目安で、数値が正確な値です。</p>
+<p>グループは 600 個で、最小のグループは 1 行です。1 行だけのグループに属する行は 100.0%、k = 5 未満のグループに属する行は 100.0% です。</p>
+<table>
+<caption>グループのサイズ別の行数</caption>
+<thead><tr><th scope="col">サイズ</th><th scope="col">割合</th><th scope="col">行数</th></tr></thead>
+<tbody>
+<tr><th scope="row">1</th><td class="bar"><div class="fill" style="width:100%"></div></td><td class="n">600</td></tr>
+<tr><th scope="row">2</th><td class="bar"><div class="fill" style="width:0%"></div></td><td class="n">0</td></tr>
+<tr><th scope="row">3</th><td class="bar"><div class="fill" style="width:0%"></div></td><td class="n">0</td></tr>
+<tr><th scope="row">4</th><td class="bar"><div class="fill" style="width:0%"></div></td><td class="n">0</td></tr>
+<tr><th scope="row">5-9</th><td class="bar"><div class="fill" style="width:0%"></div></td><td class="n">0</td></tr>
+<tr><th scope="row">10-49</th><td class="bar"><div class="fill" style="width:0%"></div></td><td class="n">0</td></tr>
+<tr><th scope="row">50+</th><td class="bar"><div class="fill" style="width:0%"></div></td><td class="n">0</td></tr>
+</tbody>
+</table>
+</section>
+<section id="percolumn">
+<h2>列ごとの観測</h2>
+<p class="howto">この節の読み方: 準識別子として扱った列ごとに、値のばらつきと、その列がグループの分かれ方に効いているかを数えています。</p>
+<table>
+<caption>準識別子の列ごとの観測</caption>
+<thead><tr><th scope="col">列</th><th scope="col">異なる値</th><th scope="col">1 行だけのグループに属する行</th><th scope="col">この列を外すと k 未満になる行</th></tr></thead>
+<tbody>
+<tr><th scope="row">age</th><td class="n">50</td><td class="n">0</td><td class="n">600</td></tr>
+<tr><th scope="row">birth_date</th><td class="n">593</td><td class="n">586</td><td class="n">600</td></tr>
+<tr><th scope="row">sex</th><td class="n">2</td><td class="n">0</td><td class="n">600</td></tr>
+<tr><th scope="row">zip</th><td class="n">200</td><td class="n">26</td><td class="n">600</td></tr>
+</tbody>
+</table>
+</section>
+<section id="derived">
+<h2>導出関係</h2>
+<p class="howto">この節の読み方: keep（出力にそのまま残す）として扱った列と準識別子の列の組み合わせを、両方向で調べています。支持は根拠となる行数、違反は値を言い当てられなかった行数です。</p>
+<p>keep として扱った列がないため、調べた組み合わせは 0 でした。</p>
+</section>
+<section id="subject">
+<h2>同一対象の繰り返し</h2>
+<p class="howto">この節の読み方: --subject に列を指定すると、同じ人が複数の行に現れていないかを数えられます。</p>
+<p>この表では name が対象の列に使えます。</p>
+</section>
+<section id="next">
+<h2>次の一手</h2>
+<p class="howto">この節の読み方: 下書きは編集して使うためのものです。コマンド例のファイル名は読み替えてください。</p>
+<p>設定の下書き</p>
+<pre>{
+  &quot;columns&quot;: {
+    &quot;age&quot;: {
+      &quot;role&quot;: &quot;qi&quot;,
+      &quot;type&quot;: &quot;numeric&quot;,
+      &quot;widths&quot;: [
+        5,
+        10,
+        20
+      ]
+    },
+    &quot;birth_date&quot;: {
+      &quot;role&quot;: &quot;qi&quot;,
+      &quot;type&quot;: &quot;date&quot;
+    },
+    &quot;diagnosis&quot;: {
+      &quot;role&quot;: &quot;sensitive&quot;
+    },
+    &quot;name&quot;: {
+      &quot;role&quot;: &quot;id&quot;
+    },
+    &quot;sex&quot;: {
+      &quot;role&quot;: &quot;qi&quot;,
+      &quot;type&quot;: &quot;category&quot;
+    },
+    &quot;zip&quot;: {
+      &quot;length&quot;: 4,
+      &quot;role&quot;: &quot;qi&quot;,
+      &quot;type&quot;: &quot;prefix&quot;
+    }
+  },
+  &quot;k&quot;: 5
+}</pre>
+<p>次に試すコマンドの例</p>
+<pre>sieve-crowd plan people.csv -c config.json
+sieve-crowd run people.csv -c config.json -o people.output.csv</pre>
+</section>
+</main>
+<footer>
+<section id="about">
+<h2>この報告について</h2>
+<p class="howto">この節の読み方: この節は報告自体の説明です。</p>
+<ul>
+<li>これは観測であって、安全かどうかの判定ではありません。数値は、この表の、いまの役割の置き方での値です。</li>
+<li>1 人が 1 行の表であることを前提にしています。同じ人が複数の行にいる場合は、--subject を指定して観測してください。</li>
+<li>k-匿名性は、別の情報との照合や、同じグループ内の値からの属性の推測を防ぐものではありません。</li>
+<li>この報告は、表を 1 回読んで作った静的なページです。表も設定も書き換えません。</li>
+<li>セルの値はどこにも載っていません。載っているのは列名・件数・割合・ルール id・ファイル名・入力の SHA-256 だけです。</li>
+<li>同じ入力からは、いつでも同じバイト列ができます（日時や環境の情報は載せていません）。</li>
+<li>所見の並び順は固定です: 種類（code の昇順）→ 列名（コードポイント順）→ 既定の順。</li>
+<li>割合は千分率を切り捨てる整数の演算で作り、小数 1 桁の百分率で表示しています。</li>
+<li>表の中の列名は、120 コードポイントを超えると省いて表示します（次の一手の下書きには全文が入ります）。</li>
+<li>仮の役割はヒントパックの候補から仮に置いたもので、決定ではありません。</li>
+<li>色は情報を運びません（中性の色だけを使っています）。</li>
+<li>sieve-crowd scan（Sieve Crowd 0.8.2）が作成しました。</li>
+</ul>
+</section>
+</footer>
+</body>
+</html>
