@@ -9,7 +9,7 @@ import unittest
 
 from sieve_crowd.cli import main
 from sieve_crowd.jsonio import read_json, write_json
-from sieve_crowd.model import InputError
+from sieve_crowd.model import InputError, InputRefused
 from sieve_crowd.tableio import detect_format, read_any, write_any
 from sieve_crowd.xmlio import read_xml, write_xml
 
@@ -222,12 +222,15 @@ class DetectionTests(unittest.TestCase):
         self.assertEqual(detect_format(".xml"), "xml")
         self.assertEqual(detect_format(".JSON"), "json")
 
-    def test_spreadsheet_formats_are_refused_with_guidance(self):
-        with self.assertRaises(InputError) as ctx:
-            detect_format(".xlsx")
-        self.assertIn("Excel", str(ctx.exception))
-        with self.assertRaises(InputError):
+    def test_spreadsheet_formats_are_handled_per_v090(self):
+        # v0.9.0: .xlsx reads (through the safe reader); .xls/.xlsm stay
+        # refused, now with the closed-set code (exit 1, code only)
+        self.assertEqual(detect_format(".xlsx"), "xlsx")
+        with self.assertRaises(InputRefused) as ctx:
             detect_format(".xls")
+        self.assertEqual(ctx.exception.code, "unsupported_format")
+        with self.assertRaises(InputRefused):
+            detect_format(".xlsm")
 
     def test_unknown_extension_names_the_overrides(self):
         with self.assertRaises(InputError) as ctx:

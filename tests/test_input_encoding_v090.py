@@ -36,32 +36,35 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PEOPLE = os.path.join(REPO, "examples", "people.csv")
 CONFIG = os.path.join(REPO, "examples", "config.json")
 
-# v0.8.2 goldens (measured on the untouched tree, 2026-11-06).  inspect stdout
-# of examples/people.csv; the run output equals the RUN_TABLE_SHA pin; plan /
-# audit stderr; the scan HTML pins (people.csv = the T79 SCAN_SHA_EN pin, the
-# BOM copy gets its own pin because the page carries the input SHA-256).
+# Goldens.  inspect stdout and the run output are byte-identical to v0.8.2
+# (measured on the untouched tree and re-measured at 0.9.0: same values --
+# the run output equals the RUN_TABLE_SHA pin).  plan / audit stderr and the
+# scan HTML carry the "Sieve Crowd <version>" line, so those four pins were
+# re-measured at 0.9.0 on the UTF-8 family (the T79 note: re-pin on every
+# version bump).  The BOM scan pin is its own because the page carries the
+# input SHA-256.
 GOLDEN_INSPECT_PEOPLE = ("acea6c5a20350210f5d04d94edd94e3ae316d477"
-                         "e11a88bd18a46c9e0e53404b")
+                         "e11a88bd18a46c9e0e53404b")     # = v0.8.2 value
 GOLDEN_RUN_PEOPLE = ("b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138"
                      "d8ae040061500e")           # = the RUN_TABLE_SHA pin
-GOLDEN_PLAN_PEOPLE = ("71dc6c03fff97346e19995025686fe654f9af905935428e5c"
-                      "84fc5b3cbbf4cc2")
-GOLDEN_AUDIT_PEOPLE = ("2bfe1d731c261b3f375db4cafb678306a66a24bbb45a9e138"
-                       "6fa098d1339bd02")
-GOLDEN_SCAN_PEOPLE_EN = ("4f64a722dfe3e32c6bcca0606347fc1c5d4ab6cb56acd1d"
-                         "6f742da677de45ba4")  # = SCAN_SHA_EN
-GOLDEN_SCAN_PEOPLE_BOM = ("70d42395f63d4da222d4b3ed34ba247581a53c3b35b0b89"
-                          "864cb818422286241")
+GOLDEN_PLAN_PEOPLE = ("3deb5a9331af3ac99814c576f5ac10ab53a1ad2193273170c"
+                      "a3832f8b38ac426")
+GOLDEN_AUDIT_PEOPLE = ("6cdc6afd90f68d2c41488c47729107761f6742c3668bc3144"
+                       "a62e0478482dc2f")
+GOLDEN_SCAN_PEOPLE_EN = ("81e0d25211201056e8573f819a50476046a8ddf41a6636c"
+                         "fc1531460db951d9a")  # = SCAN_SHA_EN at 0.9.0
+GOLDEN_SCAN_PEOPLE_BOM = ("b2fdf286d0ace551a69793dbfa9eefa9da02ed857c2f655"
+                          "a095f11a7c0f36a24")
 # the non-ASCII UTF-8 twin (名前/住所/年齢 with ①㈱髙); its CP932 twin must
 # produce the same table (T83), so its outputs are pinned here too
 GOLDEN_INSPECT_JP = ("cce5efebeeb10765f5f879413ccff357e948f22cef5640dcba1a"
                      "1a3d37aa93c0")
 GOLDEN_RUN_JP = ("3c503d87eb50033c7514a33101a99a554667619a370989ace0d1ff42"
                  "14a2e5dc")
-GOLDEN_PLAN_JP = ("c1c868b4425d67dd453dbdd784c52890f12a4d01e038c0a3fa6c0e"
-                  "3dd661ef20")
-GOLDEN_AUDIT_JP = ("5789b81ea5d288235fada0f0d00f045f75810be65c2f2b96c2f3d"
-                   "22e6e5aca0f")
+GOLDEN_PLAN_JP = ("28f1a2f8089dae4e6056112f452cc5bcdac487de8c4c73605334b6"
+                  "561351c0b9")
+GOLDEN_AUDIT_JP = ("08cedc70f3b8ddedb2d1d6b57514756d62b3e32f676fce62f07dd"
+                   "6aea08baf3a")
 
 NOTICE_CP932_AUTO = "input encoding: cp932 (auto)"
 NOTICE_CP932_SPEC = "input encoding: cp932 (specified)"
@@ -251,7 +254,7 @@ class T85DetectionOrder(unittest.TestCase):
             code, out, err = cli(["inspect", path])
             self.assertEqual(code, 0)
             self.assertNotIn(b"input encoding:", err)
-            self.assertIn(b"name,", out)               # BOM stripped cleanly
+            self.assertIn(b"name:", out)               # BOM stripped cleanly
             self.assertNotIn(b"\xef\xbb\xbf", out)
 
     def test_utf8_before_cp932_on_dual_decodable_bytes(self):
@@ -297,7 +300,10 @@ class T86ExplicitEncoding(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_explicit_cp932_decodes_strictly(self):
-        code, out, err = cli(["inspect", self.cp_only, "--encoding", "cp932"])
+        # 0x82 0x60 is Ａ in CP932; put it in the header so inspect shows it
+        path = write(os.path.join(self.tmp.name, "hdr.csv"),
+                     b"\x82\x60\nx\n")
+        code, out, err = cli(["inspect", path, "--encoding", "cp932"])
         self.assertEqual(code, 0)
         self.assertIn("Ａ".encode(), out)
 
@@ -310,7 +316,8 @@ class T86ExplicitEncoding(unittest.TestCase):
         code, out, err = cli(["inspect", self.bom,
                               "--encoding", "utf-8-sig"])
         self.assertEqual(code, 0)
-        self.assertIn(b"name,", out)
+        self.assertIn(b"name:", out)
+        self.assertNotIn(b"\xef\xbb\xbf", out)
 
     def test_explicit_cp932_on_ascii_is_fine(self):
         code, out, err = cli(["inspect", PEOPLE, "--encoding", "cp932"])

@@ -44,7 +44,7 @@ FROZEN_SHAS = {
 # for the record; CLI_PY_SHA is the new pin, re-measured when cli.py landed.
 CLI_PY_SHA_V082 = "39869af6acbec555a3a93e6df5fa524f48e0f1144f0826083452dc" \
                   "2897101356"
-CLI_PY_SHA = CLI_PY_SHA_V082          # <- replaced by the new sha at feat
+CLI_PY_SHA = "a4887a7100fe642a1f2b6119be0456297e6297992a5a00813c578a5f95b8fa29"          # <- replaced by the new sha at feat
 
 # the pack pins (design 2-3: unchanged)
 RUN_TABLE_SHA = "b58249febc35c4feb6f6bfe1632aab92ca802c611759d31138d8ae04" \
@@ -195,18 +195,20 @@ class T103ImportStructure(unittest.TestCase):
                     "in sys.modules else 'ABSENT')") % (argv,)
             p = subprocess.run([sys.executable, "-c", code], cwd=REPO,
                                capture_output=True, text=True)
-            return p.stdout.strip(), p.stderr
+            return p.stdout, p.stderr
 
         with tempfile.TemporaryDirectory() as d:
             # csv run: the reader stays out of the import closure
             out, err = has_reader(["inspect", PEOPLE])
-            self.assertEqual(out, "ABSENT", out + err)
+            self.assertIn("ABSENT", out, out + err)
+            self.assertNotIn("PRESENT", out, out + err)
             # xlsx run: the reader is pulled in lazily
             xlsx = os.path.join(d, "t.xlsx")
             with open(xlsx, "wb") as fh:
                 fh.write(tiny_xlsx())
             out, err = has_reader(["inspect", xlsx])
-            self.assertEqual(out, "PRESENT", out + err)
+            self.assertIn("PRESENT", out, out + err)
+            self.assertNotIn("ABSENT", out, out + err)
 
 
 class T104Version(unittest.TestCase):

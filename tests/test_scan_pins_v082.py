@@ -42,12 +42,13 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PEOPLE = os.path.join(REPO, "examples", "people.csv")
 CONFIG = os.path.join(REPO, "examples", "config.json")
 
-# The four scan readings of examples/people.csv at Sieve Crowd 0.8.2 with
+# The four scan readings of examples/people.csv (re-measured at 0.9.0; the
+# page carries "Sieve Crowd <version>") with
 # builtin jp-basic 1.7.0.  Re-measure on every version/pack/wording change.
-SCAN_SHA_EN = "4f64a722dfe3e32c6bcca0606347fc1c5d4ab6cb56acd1d6f742da677de45ba4"
-SCAN_SHA_JA = "d107cd8f8aebf8977c41a6005ff1627206d66e6cf3cab6c6feb2575c76be6fd0"
-SCAN_CFG_SHA_EN = "208c530d1a675b39b0e6fba7ac9679dc13c4571ca6868e25e75229c5c9e36ec2"
-SCAN_CFG_SHA_JA = "e3a1fc40c15d29481d00a4adc83e10d9c4dc459ddf23e4e945cc842f45dcd83d"
+SCAN_SHA_EN = "81e0d25211201056e8573f819a50476046a8ddf41a6636cfc1531460db951d9a"
+SCAN_SHA_JA = "6d9dc3a198d020f496627dbecd2fd166141cc1d0dee0cd65f0cf1eb4181f75ee"
+SCAN_CFG_SHA_EN = "645f580572984031b78ac9b46ee2386039062ffe2b1a0c3e47a06796ed05df83"
+SCAN_CFG_SHA_JA = "73b5ef1ee90fbbe6350bb6668ec7ee65bb43871d9e8096a6678b57c7c547411e"
 
 
 def _scan_bytes(*argv):

@@ -264,7 +264,7 @@ class T69ScanDeterminismAndHygiene(ScanCase):
         self.assertIsNone(re.search(r"\bon[a-z]+\s*=", low))
         self.assertIn('<meta http-equiv="Content-Security-Policy" '
                       "content=\"default-src 'none'; style-src 'unsafe-inline'\">", html1)
-        self.assertIn("Sieve Crowd 0.8.2", html1)
+        self.assertIn("Sieve Crowd 0.9.0", html1)   # re-pinned at 0.9.0
         self.assertIn("jp-basic", html1)
         self.assertIn("1.7.0", html1)
 

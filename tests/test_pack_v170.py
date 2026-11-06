@@ -70,7 +70,9 @@ DERIVED_PY_SHA = "2123cc0d4b2ef5dc5e2ecccf718827512278339e7cf3e02379fa4518e82076
 CHARTABLE_PY_SHA = "4a01afa04a9678d86a0562ae48a2b578b2dd547247d941762088fcf32405b7a5"
 HIDDEN_CHARS_PY_SHA = "47bd0aa3a83b0b33a39ef8a3d353efd4251f713eefcbfcb834f25317a5a672f5"
 HINTPACK_PY_SHA = "8aa8282680f32ccf7c67a5ada9692c82ecd291374db233a7fcab3f19f607267e"
-CLI_PY_SHA = "39869af6acbec555a3a93e6df5fa524f48e0f1144f0826083452dc2897101356"
+# v0.9.0: cli.py is unfrozen for the input layer (the one deliberate pin
+# change, reported); the value below is the new cli.py sha256
+CLI_PY_SHA = "a4887a7100fe642a1f2b6119be0456297e6297992a5a00813c578a5f95b8fa29"
 
 
 def call(*argv):
@@ -280,8 +282,9 @@ class T81Pins(unittest.TestCase):
         packs = load_packs([], include_builtin=True)
         self.assertEqual(packs[0].version, "1.7.0")
 
-    def test_application_version_is_0_8_2(self):
-        self.assertEqual(sieve_crowd.__version__, "0.8.2")
+    def test_application_version_is_0_9_0(self):
+        # v0.9.0: the version pin moves with the release
+        self.assertEqual(sieve_crowd.__version__, "0.9.0")
 
     def test_chartable_file_is_pinned(self):
         with open(os.path.join(REPO, "sieve_crowd", "chartable_v1.json"), "rb") as fh:
