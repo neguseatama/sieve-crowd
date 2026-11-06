@@ -1,8 +1,15 @@
-# Sieve Crowd v0.8.2
+# Sieve Crowd v0.9.0
 
 [English](README.md) | 日本語
 
 **テーブルデータ匿名化・プライバシー保護エンジン**
+
+**v0.9.0 の新機能:** Excel から保存した CSV（CP932 / Windows-31J）と
+Excel の `.xlsx` ブックを、そのまま直接読めます。すべてのサブコマンド
+（`scan` / `plan` / `inspect` / `audit` / `run`）が、UTF-8 の CSV と同じように
+扱います: `sieve-crowd run 名簿.xlsx -c config.json -o output.csv`。
+文字コードは自動判定（UTF-8、BOM 付き UTF-8、CP932。`--encoding` で明示指定も可）、
+シートは既定で最初の表示シート（`--sheet` で指定も可）です。
 
 [![PyPI Version](https://img.shields.io/pypi/v/sieve-crowd.svg)](https://pypi.org/project/sieve-crowd/)
 [![Python Version](https://img.shields.io/pypi/pyversions/sieve-crowd.svg)](https://pypi.org/project/sieve-crowd/)
@@ -103,6 +110,11 @@ pip install .
 ---
 
 ## 💻 クイックスタート
+
+入力は、UTF-8 の CSV、Excel が保存した CP932 の CSV、`.xlsx` ブック、
+JSON/XML のいずれでもかまいません。文字コードとブックのシートは自動で判定します
+（`--encoding` / `--sheet` で上書き可。非 UTF-8 を採用したときだけ
+`input encoding: cp932 (auto)` の 1 行を stderr に出します）。
 
 ### 1. 構造の検査
 
@@ -266,6 +278,7 @@ python -m unittest discover -s tests -v
 
 | 版 | 主な内容 |
 | :--- | :--- |
+| 0.9.0 | CP932 の CSV と Excel の `.xlsx` ブックを直接読める。文字コードは決定的に自動判定（BOM 付き UTF-8 → 厳密な UTF-8 → 厳密な CP932。どれでもなければ `unsupported_encoding` で停止 — 置換文字や黙って進む文字化けはなし）。`--encoding` で明示指定でき、非 UTF-8 を採用したときだけ stderr に 1 行の通知（結果ファイル・レシート・scan の HTML・各 pin には入らない）。`.xlsx` は標準ライブラリだけの安全な読み取り（Lens と同じ流儀：閉じた拒否符号、ファイル/エントリ/パート/合計/要素の上限、DOCTYPE・ENTITY の拒否、Strict 名前空間は URI で判定して拒否、シートは逐次読み）。共有/インライン/リッチの文字列（ふりがな `<rPh>` は値に入れない）、数値はファイルのテキストのまま、数式はキャッシュ値、日付は ISO 変換（1900/1904 系）、既定は最初の表示シートで `--sheet` は名前・番号の両方、非表示の行・列もデータとして読む。全サブコマンドが両形式を受け付け、UTF-8 の入力に対する出力は v0.8.2 とバイト一致。 |
 | 0.8.2 | jp-basic 1.7.0: 列名だけの 2 つのルールを追加 — `jp-sex`（性別列は `qi` と階層なしの `category` を提案）と `jp-diagnosis`（病名列は `sensitive`）。列名のみの根拠では `role_mismatch` は出ません。`examples/people.csv` の `sex`/`diagnosis` が「未割当（仮に keep）」でなくなり、scan の最初の画面が実際の表に近い読み物になります。設定なしの読み 2 つを `docs/samples/` に同梱。 |
 | 0.8.1 | `scan` の修正: 「この報告について」の先頭に 3 つの注意書きを追加 — これは観測であって、安全かどうかの判定ではない（数値は、いまの役割の置き方での値）・1 人が 1 行の表の前提（同じ人が複数の行にいる場合は `--subject` で観測）・k-匿名性は別の情報との照合やグループ内の値からの属性の推測を防がない。要点の役割の内訳は各列を一度だけ数える（`-c` なしは仮の keep を「未割当（仮に keep）」の 1 区分にまとめ、`-c` ありは宣言された役割のみを数える — 従来の「keep」と「未割当」の二重計上を解消）。言い回しの整理（「1 行だけのグループに属する行」「仮に置いたもの」「仮の割り当て」）。 |
 | 0.8.0 | `scan` サブコマンド: 1 枚の静的 HTML — "いまどう見えているか" — を、`inspect`/`plan`/`audit` が既に持っている測定の組み立てで実現（ヒントパックの候補から仮の役割、または `-c` の役割をそのまま。`audit` のグループの大きさと QI 列ごとの観測。`derived` の keep × qi の組。不可視文字の件数。未決列を `?` にした設定の下書きと `plan`/`run` のコマンド例）。新しい測定は作らず、セルの値も出さず、判定語も使わない。同じ入力はバイト同一（日時・環境値なし）。CSP `default-src 'none'` でインラインスタイルのみ、中性色、割合は整数のみ（千分率切り捨て、小数 1 桁の百分率）。出力は `INPUT.scan.html`（アトミック・無条件上書き、`--force` なし）。`-o` のない標準入力、入力/設定と同じ出力先は終了コード 2。所見は固定順（code → 列名コードポイント順 → 既定の順）。不可視・制御文字は `<U+XXXX>` 表示。列名は表示のみ 120 コードポイントで省略（下書きは全文）。悪意ある名前でもマークアップは作れない。 |

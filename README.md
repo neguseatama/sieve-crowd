@@ -1,8 +1,16 @@
-# Sieve Crowd v0.8.2
+# Sieve Crowd v0.9.0
 
 English | [日本語](README.ja.md)
 
 **Table data anonymization and privacy protection engine**
+
+**New in v0.9.0:** CSVs saved from Excel (CP932 / Windows-31J) and Excel
+`.xlsx` workbooks can be read directly — every subcommand
+(`scan` / `plan` / `inspect` / `audit` / `run`) takes them like any UTF-8
+CSV: `sieve-crowd run 名簿.xlsx -c config.json -o output.csv`.
+The character code is detected automatically (UTF-8, UTF-8 with BOM,
+CP932; or force it with `--encoding`), and for workbooks the sheet is
+chosen automatically (the first visible one) or with `--sheet`.
 
 [![PyPI Version](https://img.shields.io/pypi/v/sieve-crowd.svg)](https://pypi.org/project/sieve-crowd/)
 [![Python Version](https://img.shields.io/pypi/pyversions/sieve-crowd.svg)](https://pypi.org/project/sieve-crowd/)
@@ -103,6 +111,12 @@ pip install .
 ---
 
 ## 💻 Quick start
+
+The input can be a UTF-8 CSV, a CP932 CSV saved by Excel, an `.xlsx`
+workbook, or JSON/XML — the character code and the workbook sheet are
+detected automatically (`--encoding` / `--sheet` to override; the notice
+`input encoding: cp932 (auto)` on stderr tells you when a non-UTF-8 code
+was adopted).
 
 ### 1. Inspect the structure
 
@@ -266,6 +280,7 @@ One line per release. The feature sections above always describe the current ver
 
 | Version | Highlights |
 | :--- | :--- |
+| 0.9.0 | CP932 CSVs and Excel `.xlsx` workbooks read natively. The character code is detected automatically and deterministically (UTF-8 BOM → strict UTF-8 → strict CP932; anything else refuses with `unsupported_encoding` — no replacement characters, no silent mojibake), `--encoding` pins it, and a non-UTF-8 adoption prints one stderr notice that never reaches any output or pin. `.xlsx` reads through a stdlib-only safe reader in the Sieve Lens style (closed refusal codes, file/entry/part/total/element limits, DOCTYPE/ENTITY refusal, Strict-namespace refusal by URI, streamed sheets): shared/inline/rich strings without furigana, raw number text, cached formula values, ISO-converted dates (1900/1904), first-visible-sheet default with `--sheet` by name or index, hidden rows/columns read as data. All subcommands take both formats; UTF-8 results are byte-identical to v0.8.2. |
 | 0.8.2 | jp-basic 1.7.0: two name-only column rules join — `jp-sex` (sex/gender columns suggest `qi` with a hierarchy-free `category`) and `jp-diagnosis` (diagnosis/disease columns suggest `sensitive`); name-only evidence never fires `role_mismatch`. On `examples/people.csv` the `sex`/`diagnosis` columns stop being `unassigned (provisionally keep)` — the scan's first screen now reads like the actual table. The two no-config readings ship as `docs/samples/`. |
 | 0.8.1 | `scan` fixes: the about section now opens with the three cautions — this is an observation, not a judgment of safety (the numbers are the values under the roles as they are placed now); the one-row-per-person assumption (the same person on several rows — observe the repetition with `--subject`); and k-anonymity's limits (it does not prevent matching against other information or guessing an attribute from the values inside a group). The summary's role breakdown counts each column once: without `-c` the tentative keeps are one `unassigned (provisionally keep)` bucket; with `-c` only the declared roles are counted. Three wording fixes (a row that belongs to a group of one; placed provisionally; the provisional assignment). |
 | 0.8.0 | The `scan` subcommand: one static HTML page — "how the table looks right now" — assembled from what `inspect`/`plan`/`audit` already measure (hint-pack candidates as provisional roles, or the `-c` roles as they are; `audit`'s group sizes and per-QI observations; `derived`'s keep-vs-qi pairs; the invisible-character counts; a configuration draft with `?` for undecided columns and `plan`/`run` command examples). No new measurement, no cell values, no judgment words, byte-identical per input (no timestamps, no environment values), CSP `default-src 'none'` with inline styles only, neutral colors, integer-only shares (floored per-mille, one-decimal percent). Output `INPUT.scan.html` (atomic, unconditional overwrite, no `--force`); stdin without `-o`, or an output equal to the input/config, exits 2. Findings order fixed (code → column name codepoint → source order); invisible/control characters display as `<U+XXXX>`; column names display at 120 code points (the draft keeps full names); hostile names cannot inject markup. |
